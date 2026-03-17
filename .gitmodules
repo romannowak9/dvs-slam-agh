@@ -1,0 +1,3 @@
+[submodule "sota/ultimate-slam"]
+	path = sota/ultimate-slam
+	url = https://github.com/romannowak9/rpg_ultimate_slam_open
