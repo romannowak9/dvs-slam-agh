@@ -1,0 +1,28 @@
+Panels:
+  - Class: rviz/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Alpha: 1
+      Cell Size: 1
+      Class: rviz/Grid
+      Enabled: true
+      Name: Grid
+    - Class: rviz/Image
+      Enabled: true
+      Image Topic: /event_frames
+      Name: EventFrameView
+      Queue Size: 2
+      Transport Hint: raw
+    - Class: rviz/Image
+      Enabled: true
+      Image Topic: /camera/color/image_raw
+      Name: RGB_Camera
+      Transport Hint: compressed
+  Global Options:
+    Fixed Frame: dvxplorer_left
+    Frame Rate: 30
+  Window Geometry:
+    Height: 800
+    Width: 1200

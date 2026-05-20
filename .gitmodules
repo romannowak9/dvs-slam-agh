@@ -1,3 +1,9 @@
 [submodule "sota/ultimate-slam"]
 	path = sota/ultimate-slam
 	url = https://github.com/romannowak9/rpg_ultimate_slam_open
+[submodule "sota/esvo2"]
+	path = sota/esvo2
+	url = https://github.com/romannowak9/ESVO2.git
+[submodule "sota/events_h52bag"]
+	path = sota/events_h52bag
+	url = https://github.com/tub-rip/events_h52bag.git

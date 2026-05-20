@@ -1,0 +1,26 @@
+<!-- <launch>
+    <node name="example_node"
+          pkg="pose_estimation"
+          type="example_node.py"
+          output="screen" />
+</launch> -->
+
+<launch>
+    <!-- Globla parameters -->
+    <param name="/use_sim_time" value="true" />
+
+    <!-- Rosbag data play -->
+    <node pkg="rosbag" type="play" name="player" args="--clock /data/evSLAM/seq001.bag -r 0.5" />
+
+    <!-- agreggation node -->
+    <node name="event_aggregator" pkg="pose_estimation" type="event_aggregator.py" output="screen">
+        <param name="frame_type" value="exponential" /> 
+        <param name="do_filter" value="true" />
+        <param name="filter_t" value="0.05" />
+        <param name="width" value="640" />
+        <param name="height" value="480" />
+    </node>
+
+    <!-- Auto wisualization in RViz -->
+    <node name="rviz" pkg="rviz" type="rviz" args="-d $(find pose_estimation)/rviz/config.rviz" required="true" />
+</launch>
