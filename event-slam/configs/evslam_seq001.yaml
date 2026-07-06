@@ -1,0 +1,152 @@
+# Base configuration for the first offline ELOPE-like stereo VO stage.
+# This file will be extended in later implementation steps.
+
+project:
+  name: event_slam
+  stage: "stage_1_elopelike_stereo_vo"
+
+dataset:
+  type: evslam
+  sequence_name: seq001
+
+  # Adjust these paths to your Docker/container layout.
+  bag_path: /data/evSLAM/seq001.bag
+
+  # Timestamps at which the final trajectory should later be exported.
+  reference_timestamps_path: /data/evSLAM/timestamps/seq001_ref_time.txt
+
+  topics:
+    events_left: /dvxplorer_left/events
+    events_right: /dvxplorer_right/events
+
+    imu_left: /dvxplorer_left/imu
+    imu_right: /dvxplorer_right/imu
+
+    # RealSense topics are not used as the main VO source in stage 1.
+    # They are kept here for possible debugging or future extensions.
+    color: /camera/color/image_raw/compressed
+    depth: /camera/depth/image_rect_raw/compressed
+    infra1: /camera/infra1/image_rect_raw/compressed
+    infra2: /camera/infra2/image_rect_raw/compressed
+
+calibration:
+  # The parser will be implemented in the next step.
+  camera_yaml_path: /data/evSLAM/calibration/calib_results_cam_drone.yaml
+  imu_yaml_path: /data/evSLAM/calibration/calib_results_imu_drone.yaml
+
+  camera_model: pinhole
+  distortion_model: radtan
+
+  # Internal convention:
+  # T_C_right_C_left transforms points from the left camera frame to the right camera frame.
+  reference_camera: left
+
+time:
+  # The internal time unit is seconds stored as float64.
+  internal_unit: sec
+
+  # Optional test range.
+  # null means that the whole sequence should be processed.
+  t_start: null
+  t_end: null
+
+events:
+  window:
+    # Stage 1 starts with fixed time windows, similarly to the ELOPE prototype.
+    mode: time
+    time_window: 0.0333333333
+
+  aggregation:
+    # Later options: standard, exponential.
+    frame_type: exponential
+
+    # EvSLAM DVXplorer event camera resolution.
+    width: 640
+    height: 480
+
+  filter:
+    enabled: false
+
+    # Parameters reserved for a background activity or refractory filter.
+    type: baf
+    filter_t: 0.03
+    filter_k: 2
+    filter_size: 3
+
+rectification:
+  enabled: true
+
+  # OpenCV stereo rectification alpha.
+  # 0.0 usually crops invalid regions more aggressively.
+  alpha: 0.0
+
+feature_tracking:
+  detector: fast
+
+  fast:
+    threshold: 25
+    nonmax_suppression: true
+
+  gftt:
+    max_corners: 1500
+    quality_level: 0.01
+    min_distance: 7
+
+  lk:
+    window_size: 21
+    max_level: 3
+    max_iterations: 30
+    epsilon: 0.01
+
+  min_features: 800
+  redetect_if_below: 500
+
+stereo_depth:
+  enabled: true
+
+  # After stereo rectification, corresponding points should lie nearly on the same image row.
+  max_epipolar_error_px: 2.0
+
+  min_disparity_px: 1.0
+  max_disparity_px: 256.0
+
+  min_depth_m: 0.1
+  max_depth_m: 100.0
+
+vo:
+  mode: stereo_pnp
+
+  pnp:
+    reprojection_error_px: 3.0
+    confidence: 0.999
+    iterations_count: 100
+    min_inliers: 30
+
+  # IMU is disabled in the first VO stage.
+  # It will later be used for rotation compensation or visual-inertial odometry.
+  imu:
+    enabled: false
+    rotation_compensation: false
+
+trajectory:
+  initial_pose:
+    # Initial T_W_Cleft.
+    # Stage 1 starts from identity.
+    type: identity
+
+output:
+  directory: outputs
+
+  debug_frames_dir: outputs/debug_frames
+  trajectory_dir: outputs/trajectories
+  logs_dir: outputs/logs
+
+  trajectory_format: tum
+  trajectory_file: outputs/trajectories/seq001_vo.txt
+
+debug:
+  save_event_frames: false
+  save_rectified_frames: false
+  display: false
+
+  log_every_n_windows: 20
