@@ -10,7 +10,7 @@ import numpy as np
 from event_slam.core.geometry import Pose, interpolate_pose
 
 
-@dataclass(slots=True)
+@dataclass()
 class PoseSample:
     """
     A single trajectory sample.

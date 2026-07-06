@@ -229,7 +229,7 @@ def slerp_quat_xyzw(q0: np.ndarray, q1: np.ndarray, alpha: float) -> np.ndarray:
     return quat_xyzw_normalize((s0 * q0) + (s1 * q1))
 
 
-@dataclass(slots=True)
+@dataclass()
 class Pose:
     """
     Camera pose represented as T_W_C.

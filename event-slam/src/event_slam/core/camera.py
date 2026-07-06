@@ -7,7 +7,7 @@ import numpy as np
 from event_slam.core.geometry import invert_transform
 
 
-@dataclass(slots=True)
+@dataclass()
 class CameraModel:
     """
     A single calibrated camera model.
@@ -213,7 +213,7 @@ class CameraModel:
         )
 
 
-@dataclass(slots=True)
+@dataclass()
 class StereoCalibration:
     """
     Calibration of a stereo camera pair.
