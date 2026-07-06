@@ -48,3 +48,12 @@ cd /mnt/docker_disk/home/mgr/dvs-slam-agh/event-slam
 xhost +local:docker
 docker start -ai event-slam-dev
 ```
+
+## Usage of scripts
+
+Calibration debug script
+```bash
+python3 scripts/debug_calibration.py \
+  --camera-yaml /data/evSLAM/drone_calibration/calib_results_cam_drone.yaml \
+  --imu-yaml /data/evSLAM/drone_calibration/calib_results_imu_drone.yaml
+```
