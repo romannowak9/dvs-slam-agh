@@ -56,14 +56,14 @@ source /opt/ros/noetic/setup.bash
 
 ## Usage of scripts
 
-Calibration debug script
+### Calibration debug script
 ```bash
 python3 scripts/debug_calibration.py \
   --camera-yaml /data/evSLAM/drone_calibration/calib_results_cam_drone.yaml \
   --imu-yaml /data/evSLAM/drone_calibration/calib_results_imu_drone.yaml
 ```
 
-bag verification script
+### bag verification script
 ```bash
 python3 scripts/inspect_bag.py \
   --bag /data/evSLAM/seq001.bag
@@ -80,4 +80,23 @@ python3 scripts/inspect_bag.py \
   --num-batches 5 \
   --sample-events 8 \
   --full-scan
+```
+
+### Event window verification
+```bash
+python3 scripts/debug_event_windows.py \
+  --bag /data/evSLAM/seq001.bag \
+  --t-start 956.7
+```
+
+```bash
+python3 scripts/debug_event_windows.py \
+  --bag /data/evSLAM/seq001.bag \
+  --left-topic /dvxplorer_left/events \
+  --right-topic /dvxplorer_right/events \
+  --time-window 0.0333333333 \
+  --num-windows 5 \
+  --sample-events 8 \
+  --t-start 956.7 \
+  --summary
 ```
