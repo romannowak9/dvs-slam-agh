@@ -100,3 +100,35 @@ python3 scripts/debug_event_windows.py \
   --t-start 956.7 \
   --summary
 ```
+
+### Event frames verification
+
+```bash
+python3 scripts/debug_event_frames.py \
+  --bag /data/evSLAM/seq001.bag \
+  --num-frames 10 \
+  --time-window 0.1 \
+  --save-preview
+```
+
+Exponential decay
+```bash
+python3 scripts/debug_event_frames.py \
+  --bag /data/evSLAM/seq001.bag \
+  --mode exponential \
+  --tau 0.3 \
+  --num-frames 10 \
+  --time-window 0.3 \
+  --save-preview
+```
+
+BAF Filter
+```bash
+python3 scripts/debug_event_frames.py \
+  --bag /data/evSLAM/seq001.bag \
+  --use-baf \
+  --baf-time-window 0.0416667 \
+  --num-frames 10 \
+  --time-window 0.1 \
+  --save-preview
+```
