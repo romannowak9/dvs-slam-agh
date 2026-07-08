@@ -126,9 +126,55 @@ BAF Filter
 ```bash
 python3 scripts/debug_event_frames.py \
   --bag /data/evSLAM/seq001.bag \
+  --mode exponential \
+  --tau 0.03 \
   --use-baf \
-  --baf-time-window 0.0416667 \
+  --baf-time-window 0.006 \
+  --baf-radius 2 \
+  --baf-min-neighbors 5 \
   --num-frames 10 \
-  --time-window 0.1 \
-  --save-preview
+  --time-window 0.006 \
+  --t-start 970 \
+  --save-preview \
 ```
+
+Use `--display` to display images in window and not save imgs to files
+
+### Comparing sensors
+
+Only color camera and left dvs
+```bash
+python3 scripts/compare_sensors.py \
+  --bag /data/evSLAM/seq001.bag \
+  --mode exponential \
+  --tau 0.03 \
+  --use-baf \
+  --baf-time-window 0.005 \
+  --baf-radius 1 \
+  --baf-min-neighbors 2 \
+  --num-frames 100 \
+  --time-window 0.005 \
+  --t-start 950 \
+  --only-color \
+  --display
+```
+
+All left sensors
+```bash
+python3 scripts/compare_sensors.py \
+  --bag /data/evSLAM/seq001.bag \
+  --mode exponential \
+  --tau 0.04 \
+  --use-baf \
+  --baf-time-window 0.005 \
+  --baf-radius 2 \
+  --baf-min-neighbors 4 \
+  --num-frames 10 \
+  --time-window 0.00q \
+  --t-start 970 \
+  --display
+```
+
+Use `--display` to display images in window and not save imgs to files
+
+
