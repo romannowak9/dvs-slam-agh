@@ -107,23 +107,22 @@ class EventFrameAggregator:
             dtype=np.uint8,
         )
 
-        if len(batch) == 0:
-            return image
-
         mask = self._valid_event_mask(batch)
 
         if not np.any(mask):
             return image
 
-        for x, y, p in zip(
-            batch.x[mask],
-            batch.y[mask],
-            batch.p[mask],
-        ):
-            if bool(p):
-                image[int(y), int(x)] = POSITIVE_INTENSITY
-            else:
-                image[int(y), int(x)] = NEGATIVE_INTENSITY
+        linear_idx, last_event_idx = self._last_event_per_pixel(batch, mask)
+
+        p = batch.p[mask][last_event_idx]
+
+        image_flat = image.reshape(-1)
+
+        positive_idx = linear_idx[p]
+        negative_idx = linear_idx[~p]
+
+        image_flat[positive_idx] = POSITIVE_INTENSITY
+        image_flat[negative_idx] = NEGATIVE_INTENSITY
 
         return image
 
@@ -132,27 +131,7 @@ class EventFrameAggregator:
         batch: EventBatch,
         t_ref: float,
     ) -> np.ndarray:
-        last_t = np.full(
-            (self.height, self.width),
-            -np.inf,
-            dtype=np.float64,
-        )
-
-        last_p = np.zeros(
-            (self.height, self.width),
-            dtype=np.bool_,
-        )
-
         mask = self._valid_event_mask(batch)
-
-        for x, y, t, p in zip(
-            batch.x[mask],
-            batch.y[mask],
-            batch.t[mask],
-            batch.p[mask],
-        ):
-            last_t[int(y), int(x)] = float(t)
-            last_p[int(y), int(x)] = bool(p)
 
         image = np.full(
             (self.height, self.width),
@@ -160,28 +139,45 @@ class EventFrameAggregator:
             dtype=np.float64,
         )
 
-        active = np.isfinite(last_t)
-
-        if self.polarity_mode == PolarityMode.POSITIVE:
-            active = active & last_p
-        elif self.polarity_mode == PolarityMode.NEGATIVE:
-            active = active & (~last_p)
-
-        if not np.any(active):
+        if not np.any(mask):
             return image.astype(np.uint8)
 
-        age = np.maximum(0.0, float(t_ref) - last_t[active])
+        linear_idx, last_event_idx = self._last_event_per_pixel(batch, mask)
+
+        t = batch.t[mask][last_event_idx]
+        p = batch.p[mask][last_event_idx]
+
+        age = np.maximum(0.0, float(t_ref) - t)
         weight = np.exp(-age / self.tau)
 
-        active_polarity = last_p[active]
-
         values = np.full(weight.shape, float(BACKGROUND_INTENSITY), dtype=np.float64)
-        values[active_polarity] = BACKGROUND_INTENSITY + 128.0 * weight[active_polarity]
-        values[~active_polarity] = BACKGROUND_INTENSITY - 127.0 * weight[~active_polarity]
+        values[p] = BACKGROUND_INTENSITY + 128.0 * weight[p]
+        values[~p] = BACKGROUND_INTENSITY - 127.0 * weight[~p]
 
-        image[active] = values
+        image_flat = image.reshape(-1)
+        image_flat[linear_idx] = values
 
         return np.clip(np.rint(image), 0, 255).astype(np.uint8)
+
+    def _last_event_per_pixel(
+        self,
+        batch: EventBatch,
+        mask: np.ndarray,
+    ) -> tuple:
+        x = batch.x[mask].astype(np.int64)
+        y = batch.y[mask].astype(np.int64)
+
+        linear_idx = y * self.width + x
+
+        _, reversed_unique_idx = np.unique(
+            linear_idx[::-1],
+            return_index=True,
+        )
+
+        last_event_idx = linear_idx.size - 1 - reversed_unique_idx
+        last_linear_idx = linear_idx[last_event_idx]
+
+        return last_linear_idx, last_event_idx
 
     def _valid_event_mask(self, batch: EventBatch) -> np.ndarray:
         mask = (
@@ -224,3 +220,4 @@ class EventFrameAggregator:
             t_end = batch_t_end
 
         return float(t_start), float(t_end)
+    

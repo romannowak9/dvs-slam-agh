@@ -282,39 +282,34 @@ class _EventBatchBuffer:
     """
     Small internal event buffer for one camera.
 
-    The buffer stores only events that have not yet been assigned to a finished
-    window. It is deliberately private because synchronization policy belongs to
-    StereoEventWindowBuilder.
+    The buffer stores EventBatch objects instead of concatenating every incoming
+    batch immediately. This avoids repeated np.concatenate calls during streaming.
     """
 
     def __init__(self, camera: CameraId) -> None:
         self.camera = CameraId(camera)
-
-        self.t = np.empty(0, dtype=np.float64)
-        self.x = np.empty(0, dtype=np.int32)
-        self.y = np.empty(0, dtype=np.int32)
-        self.p = np.empty(0, dtype=np.bool_)
+        self.batches = []
 
         self.exhausted = False
         self.last_seen_time = None
 
     @property
     def is_empty(self) -> bool:
-        return len(self.t) == 0
+        return len(self.batches) == 0
 
     @property
     def first_time(self) -> float | None:
         if self.is_empty:
             return None
 
-        return float(self.t[0])
+        return float(self.batches[0].t[0])
 
     @property
     def last_time(self) -> float | None:
         if self.is_empty:
             return self.last_seen_time
 
-        return float(self.t[-1])
+        return float(self.batches[-1].t[-1])
 
     def append(self, batch: EventBatch) -> None:
         if batch.camera != self.camera:
@@ -331,11 +326,7 @@ class _EventBatchBuffer:
                 f"Last seen={self.last_seen_time}, new first={batch.t[0]}"
             )
 
-        self.t = np.concatenate((self.t, batch.t))
-        self.x = np.concatenate((self.x, batch.x))
-        self.y = np.concatenate((self.y, batch.y))
-        self.p = np.concatenate((self.p, batch.p))
-
+        self.batches.append(batch)
         self.last_seen_time = float(batch.t[-1])
 
     def has_reached(self, timestamp: float) -> bool:
@@ -351,24 +342,42 @@ class _EventBatchBuffer:
         if self.is_empty:
             return EventBatch.empty(self.camera)
 
-        in_window = (self.t >= t_start) & (self.t < t_end)
+        selected = []
+        remaining = []
 
-        batch = EventBatch(
-            t=self.t[in_window],
-            x=self.x[in_window],
-            y=self.y[in_window],
-            p=self.p[in_window],
-            camera=self.camera,
-        )
+        for batch in self.batches:
+            if batch.t[-1] < t_start:
+                continue
 
-        keep = self.t >= t_end
+            in_window = (batch.t >= t_start) & (batch.t < t_end)
 
-        self.t = self.t[keep]
-        self.x = self.x[keep]
-        self.y = self.y[keep]
-        self.p = self.p[keep]
+            if np.any(in_window):
+                selected.append(
+                    EventBatch(
+                        t=batch.t[in_window],
+                        x=batch.x[in_window],
+                        y=batch.y[in_window],
+                        p=batch.p[in_window],
+                        camera=self.camera,
+                    )
+                )
 
-        return batch
+            keep_future = batch.t >= t_end
+
+            if np.any(keep_future):
+                remaining.append(
+                    EventBatch(
+                        t=batch.t[keep_future],
+                        x=batch.x[keep_future],
+                        y=batch.y[keep_future],
+                        p=batch.p[keep_future],
+                        camera=self.camera,
+                    )
+                )
+
+        self.batches = remaining
+
+        return self._merge_batches(selected)
 
     def drop_before(self, timestamp: float) -> None:
         """
@@ -377,12 +386,38 @@ class _EventBatchBuffer:
         if self.is_empty:
             return
 
-        keep = self.t >= timestamp
+        remaining = []
 
-        self.t = self.t[keep]
-        self.x = self.x[keep]
-        self.y = self.y[keep]
-        self.p = self.p[keep]
+        for batch in self.batches:
+            keep = batch.t >= timestamp
+
+            if np.any(keep):
+                remaining.append(
+                    EventBatch(
+                        t=batch.t[keep],
+                        x=batch.x[keep],
+                        y=batch.y[keep],
+                        p=batch.p[keep],
+                        camera=self.camera,
+                    )
+                )
+
+        self.batches = remaining
 
     def mark_exhausted(self) -> None:
         self.exhausted = True
+
+    def _merge_batches(self, batches) -> EventBatch:
+        if len(batches) == 0:
+            return EventBatch.empty(self.camera)
+
+        if len(batches) == 1:
+            return batches[0]
+
+        return EventBatch(
+            t=np.concatenate([batch.t for batch in batches]),
+            x=np.concatenate([batch.x for batch in batches]),
+            y=np.concatenate([batch.y for batch in batches]),
+            p=np.concatenate([batch.p for batch in batches]),
+            camera=self.camera,
+        )
