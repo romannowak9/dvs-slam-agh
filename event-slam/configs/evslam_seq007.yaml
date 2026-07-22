@@ -1,9 +1,9 @@
 dataset:
-  bag_path: /data/evSLAM/seq001.bag
+  bag_path: /data/evSLAM/seq007_test.bag
   left_event_topic: /dvxplorer_left/events
   right_event_topic: /dvxplorer_right/events
-  camera_yaml: /data/evSLAM/drone_calibration/calib_results_cam_drone.yaml
-  reference_timestamps_path: /data/evSLAM/ref/seq001_ref_time.txt
+  camera_yaml: /data/evSLAM/mecanum_calibration/calib_results_cam_others.yaml
+  reference_timestamps_path: /data/evSLAM/ref/seq007_ref_time.txt
 
 processing:
   time_window: 0.007
@@ -57,6 +57,6 @@ velocity:
   output_csv: velocity.csv
 
 output:
-  output_dir: outputs/evslam_vo_seq001
+  output_dir: outputs/evslam_vo_seq007
   trajectory_csv: trajectory.csv
-  result_txt: result_seq001.txt
+  result_txt: result_seq007.txt

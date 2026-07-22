@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 import numpy as np
+import cv2
 
 
 class FeatureDetectorMode(str, Enum):
@@ -33,7 +34,7 @@ class FeatureTracker:
     """
     Stateful FAST/GFTT + pyramidal Lucas-Kanade feature tracker.
 
-    The logic is intentionally close to the ELOPE-style frontend:
+    The logic:
         1. detect features in the first frame,
         2. track them with calcOpticalFlowPyrLK,
         3. reject invalid tracks,
@@ -53,7 +54,6 @@ class FeatureTracker:
         use_forward_backward_check: bool = False,
         fb_threshold: float = 1.0,
     ) -> None:
-        self.cv2 = _import_cv2()
 
         self.detector = FeatureDetectorMode(detector)
         self.min_features = int(min_features)
@@ -67,7 +67,7 @@ class FeatureTracker:
             "winSize": tuple(lk_win_size),
             "maxLevel": int(lk_max_level),
             "criteria": (
-                self.cv2.TERM_CRITERIA_EPS | self.cv2.TERM_CRITERIA_COUNT,
+                cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
                 30,
                 0.01,
             ),
@@ -108,7 +108,7 @@ class FeatureTracker:
 
         prev_points = self.prev_points
 
-        curr_points, status, _ = self.cv2.calcOpticalFlowPyrLK(
+        curr_points, status, _ = cv2.calcOpticalFlowPyrLK(
             self.prev_gray,
             gray,
             prev_points,
@@ -172,7 +172,7 @@ class FeatureTracker:
         raise ValueError(f"Unsupported detector: {self.detector}")
 
     def _detect_fast(self, gray: np.ndarray) -> np.ndarray:
-        detector = self.cv2.FastFeatureDetector_create(
+        detector = cv2.FastFeatureDetector_create(
             threshold=self.fast_threshold,
             nonmaxSuppression=True,
         )
@@ -185,12 +185,12 @@ class FeatureTracker:
         keypoints = sorted(keypoints, key=lambda kp: kp.response, reverse=True)
         keypoints = keypoints[: self.max_features]
 
-        points = self.cv2.KeyPoint_convert(keypoints)
+        points = cv2.KeyPoint_convert(keypoints)
 
         return points.reshape(-1, 1, 2).astype(np.float32)
 
     def _detect_gftt(self, gray: np.ndarray) -> np.ndarray:
-        points = self.cv2.goodFeaturesToTrack(
+        points = cv2.goodFeaturesToTrack(
             gray,
             maxCorners=self.max_features,
             qualityLevel=self.gftt_quality_level,
@@ -210,7 +210,7 @@ class FeatureTracker:
         prev_points: np.ndarray,
         curr_points: np.ndarray,
     ) -> np.ndarray:
-        back_points, back_status, _ = self.cv2.calcOpticalFlowPyrLK(
+        back_points, back_status, _ = cv2.calcOpticalFlowPyrLK(
             curr_gray,
             prev_gray,
             curr_points,
@@ -246,7 +246,7 @@ class FeatureTracker:
             return image.astype(np.uint8, copy=False)
 
         if image.ndim == 3 and image.shape[2] == 3:
-            return self.cv2.cvtColor(image, self.cv2.COLOR_BGR2GRAY)
+            return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
         raise ValueError(f"Unsupported image shape: {image.shape}")
 
@@ -281,14 +281,3 @@ def _empty_result(
         redetected=redetected,
         detected_count=detected_count,
     )
-
-
-def _import_cv2():
-    try:
-        import cv2
-    except ImportError as exc:
-        raise ImportError(
-            "OpenCV Python is required. Install it with: apt install python3-opencv"
-        ) from exc
-
-    return cv2

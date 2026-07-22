@@ -7,6 +7,8 @@ import numpy as np
 
 from event_slam.core.types import CameraId, EventBatch
 
+import rosbag
+
 
 DEFAULT_LEFT_EVENT_TOPIC = "/dvxplorer_left/events"
 DEFAULT_RIGHT_EVENT_TOPIC = "/dvxplorer_right/events"
@@ -85,7 +87,6 @@ class EvSlamRosbagReader:
         tuple
             (topic, msg, bag_timestamp)
         """
-        rosbag = _import_rosbag()
 
         normalized_topics = _normalize_topics(topics)
         ros_start_time = _seconds_to_ros_time(start_time)
@@ -202,7 +203,6 @@ class EvSlamRosbagReader:
 
         This uses the bag index metadata and does not read all messages.
         """
-        rosbag = _import_rosbag()
 
         with rosbag.Bag(str(self.bag_path), "r") as bag:
             return float(bag.get_start_time()), float(bag.get_end_time())
@@ -220,7 +220,6 @@ class EvSlamRosbagReader:
 
         The summary is read from bag metadata and does not load messages into RAM.
         """
-        rosbag = _import_rosbag()
 
         with rosbag.Bag(str(self.bag_path), "r") as bag:
             _, topics_info = bag.get_type_and_topic_info()
@@ -377,15 +376,3 @@ def _normalize_topics(topics):
         return [topics]
 
     return list(topics)
-
-
-def _import_rosbag():
-    try:
-        import rosbag
-    except ImportError as exc:
-        raise ImportError(
-            "Could not import rosbag. Run this code inside a ROS1/Noetic "
-            "environment, for example osrf/ros:noetic-desktop-full or install ROS1"
-        ) from exc
-
-    return rosbag

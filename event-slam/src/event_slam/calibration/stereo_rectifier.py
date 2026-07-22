@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+import cv2
 
 from event_slam.core.camera import StereoCalibration
 
@@ -51,7 +52,6 @@ class StereoRectifier:
         alpha: float = 0.0,
         interpolation: str = "nearest",
     ) -> None:
-        self.cv2 = _import_cv2()
         self.calibration = calibration
 
         if image_shape is None:
@@ -64,7 +64,7 @@ class StereoRectifier:
             raise ValueError(f"Invalid image_shape: {image_shape}")
 
         self.alpha = float(alpha)
-        self.interpolation = _parse_interpolation(self.cv2, interpolation)
+        self.interpolation = _parse_interpolation(interpolation)
 
         self.result = self._build_rectification()
 
@@ -106,7 +106,7 @@ class StereoRectifier:
         """
         self._check_image_size(image)
 
-        return self.cv2.remap(
+        return cv2.remap(
             image,
             self.result.left_map1,
             self.result.left_map2,
@@ -119,7 +119,7 @@ class StereoRectifier:
         """
         self._check_image_size(image)
 
-        return self.cv2.remap(
+        return cv2.remap(
             image,
             self.result.right_map1,
             self.result.right_map2,
@@ -148,7 +148,7 @@ class StereoRectifier:
 
         image_size = (self.width, self.height)
 
-        R1, R2, P1, P2, Q, roi1, roi2 = self.cv2.stereoRectify(
+        R1, R2, P1, P2, Q, roi1, roi2 = cv2.stereoRectify(
             cameraMatrix1=K1,
             distCoeffs1=D1,
             cameraMatrix2=K2,
@@ -156,7 +156,7 @@ class StereoRectifier:
             imageSize=image_size,
             R=R,
             T=T,
-            flags=self.cv2.CALIB_ZERO_DISPARITY,
+            flags=cv2.CALIB_ZERO_DISPARITY,
             alpha=self.alpha,
             newImageSize=image_size,
         )
@@ -164,22 +164,22 @@ class StereoRectifier:
         K_left_rectified = P1[:3, :3].copy()
         K_right_rectified = P2[:3, :3].copy()
 
-        left_map1, left_map2 = self.cv2.initUndistortRectifyMap(
+        left_map1, left_map2 = cv2.initUndistortRectifyMap(
             cameraMatrix=K1,
             distCoeffs=D1,
             R=R1,
             newCameraMatrix=K_left_rectified,
             size=image_size,
-            m1type=self.cv2.CV_16SC2,
+            m1type=cv2.CV_16SC2,
         )
 
-        right_map1, right_map2 = self.cv2.initUndistortRectifyMap(
+        right_map1, right_map2 = cv2.initUndistortRectifyMap(
             cameraMatrix=K2,
             distCoeffs=D2,
             R=R2,
             newCameraMatrix=K_right_rectified,
             size=image_size,
-            m1type=self.cv2.CV_16SC2,
+            m1type=cv2.CV_16SC2,
         )
 
         baseline = _baseline_from_projection(P2)
@@ -222,7 +222,7 @@ def _baseline_from_projection(P2: np.ndarray) -> float:
     return float(np.sqrt(tx * tx + ty * ty))
 
 
-def _parse_interpolation(cv2, interpolation: str) -> int:
+def _parse_interpolation(interpolation: str) -> int:
     if interpolation == "nearest":
         return cv2.INTER_NEAREST
 
@@ -230,14 +230,3 @@ def _parse_interpolation(cv2, interpolation: str) -> int:
         return cv2.INTER_LINEAR
 
     raise ValueError(f"Unsupported interpolation: {interpolation}")
-
-
-def _import_cv2():
-    try:
-        import cv2
-    except ImportError as exc:
-        raise ImportError(
-            "OpenCV Python is required. Install it with: apt install python3-opencv"
-        ) from exc
-
-    return cv2

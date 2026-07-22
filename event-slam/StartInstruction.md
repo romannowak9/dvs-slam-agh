@@ -1,4 +1,4 @@
-## Docker container
+# Docker container
 
 ```bash
 docker pull osrf/ros:noetic-desktop-full
@@ -41,7 +41,7 @@ docker exec -it event-slam-dev bash
 
 In VSCode attach to a running container and then open /workspace directory
 
-### Quickstart
+## Quickstart
 
 ```bash
 cd /mnt/docker_disk/home/mgr/dvs-slam-agh/event-slam
@@ -54,127 +54,9 @@ Attach VSCode to running container and source:
 source /opt/ros/noetic/setup.bash
 ```
 
-## Usage of scripts
-
-### Calibration debug script
-```bash
-python3 scripts/debug_calibration.py \
-  --camera-yaml /data/evSLAM/drone_calibration/calib_results_cam_drone.yaml \
-  --imu-yaml /data/evSLAM/drone_calibration/calib_results_imu_drone.yaml
-```
-
-### bag verification script
-```bash
-python3 scripts/inspect_bag.py \
-  --bag /data/evSLAM/seq001.bag
-```
-
-or with all options
-```bash
-python3 scripts/inspect_bag.py \
-  --bag /data/evSLAM/seq001.bag \
-  --left-topic /dvxplorer_left/events \
-  --right-topic /dvxplorer_right/events \
-  --imu-topic /dvxplorer_left/imu \
-  --inspect-imu \
-  --num-batches 5 \
-  --sample-events 8 \
-  --full-scan
-```
-
-### Event window verification
-```bash
-python3 scripts/debug_event_windows.py \
-  --bag /data/evSLAM/seq001.bag \
-  --t-start 956.7
-```
+# Trajectory estimation
 
 ```bash
-python3 scripts/debug_event_windows.py \
-  --bag /data/evSLAM/seq001.bag \
-  --left-topic /dvxplorer_left/events \
-  --right-topic /dvxplorer_right/events \
-  --time-window 0.0333333333 \
-  --num-windows 5 \
-  --sample-events 8 \
-  --t-start 956.7 \
-  --summary
+python3 scripts/run_evslam_vo.py \
+  --config configs/evslam_seq001.yaml
 ```
-
-### Event frames verification
-
-```bash
-python3 scripts/debug_event_frames.py \
-  --bag /data/evSLAM/seq001.bag \
-  --num-frames 10 \
-  --time-window 0.1 \
-  --save-preview
-```
-
-Exponential decay
-```bash
-python3 scripts/debug_event_frames.py \
-  --bag /data/evSLAM/seq001.bag \
-  --mode exponential \
-  --tau 0.3 \
-  --num-frames 10 \
-  --time-window 0.3 \
-  --save-preview
-```
-
-BAF Filter
-```bash
-python3 scripts/debug_event_frames.py \
-  --bag /data/evSLAM/seq001.bag \
-  --mode exponential \
-  --tau 0.03 \
-  --use-baf \
-  --baf-time-window 0.006 \
-  --baf-radius 2 \
-  --baf-min-neighbors 5 \
-  --num-frames 10 \
-  --time-window 0.006 \
-  --t-start 970 \
-  --save-preview \
-```
-
-Use `--display` to display images in window and not save imgs to files
-
-### Comparing sensors
-
-Only color camera and left dvs
-```bash
-python3 scripts/compare_sensors.py \
-  --bag /data/evSLAM/seq001.bag \
-  --mode exponential \
-  --tau 0.03 \
-  --use-baf \
-  --baf-time-window 0.005 \
-  --baf-radius 1 \
-  --baf-min-neighbors 2 \
-  --num-frames 100 \
-  --time-window 0.005 \
-  --t-start 950 \
-  --only-color \
-  --display
-```
-
-All left sensors
-```bash
-python3 scripts/compare_sensors.py \
-  --bag /data/evSLAM/seq001.bag \
-  --mode exponential \
-  --tau 0.04 \
-  --use-baf \
-  --baf-time-window 0.005 \
-  --baf-radius 2 \
-  --baf-min-neighbors 4 \
-  --num-frames 10 \
-  --time-window 0.00q \
-  --t-start 970 \
-  --display
-```
-
-Use `--display` to display images in window and not save imgs to files
-
-

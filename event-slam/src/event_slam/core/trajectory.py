@@ -181,20 +181,6 @@ class Trajectory:
 
         return np.hstack((ts, positions, quaternions)).astype(np.float64)
 
-    def save_tum(self, path: str | Path) -> None:
-        """
-        Save the trajectory as a text file:
-
-            timestamp tx ty tz qx qy qz qw
-        """
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-
-        data = self.as_tum_array()
-
-        header = "timestamp tx ty tz qx qy qz qw"
-        np.savetxt(path, data, fmt="%.9f", header=header, comments="")
-
     @classmethod
     def from_tum_array(cls, data: np.ndarray) -> Trajectory:
         """
