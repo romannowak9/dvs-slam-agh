@@ -1,0 +1,66 @@
+dataset:
+  bag_path: /data/evSLAM/seq007_test.bag
+  left_event_topic: /dvxplorer_left/events
+  right_event_topic: /dvxplorer_right/events
+  camera_yaml: /data/evSLAM/mecanum_calibration/calib_results_cam_others.yaml
+  reference_timestamps_path: /data/evSLAM/ref/seq_007_test_ref_time.txt
+
+processing:
+  time_window: 0.006
+  t_start: null
+  t_end: null
+  num_frames: 0
+
+aggregation:
+  mode: exponential
+  polarity_mode: both
+  tau: 0.01
+
+baf:
+  enabled: true
+  time_window: 0.01
+  radius: 2
+  min_neighbors: 6
+
+rectification:
+  alpha: 0.0
+  interpolation: nearest
+
+feature_tracker:
+  detector: gftt  # or fast
+  min_features: 250
+  max_features: 1000
+  fast_threshold: 25
+  forward_backward_check: false
+  fb_threshold: 1.0
+
+stereo_depth:
+  epipolar_threshold: 2.0
+  min_disparity: 0.5
+  max_disparity: 250.0
+  min_depth: 0.05
+  max_depth: 100.0
+
+pnp:
+  min_pnp_points: 15
+  min_pnp_inliers: 10
+  min_pnp_inlier_ratio: 0.15
+  max_pnp_reprojection_median: 3.0
+  max_translation_step: 0.5
+  max_rotation_step_deg: 15.0
+  pnp_reprojection_error: 3.0
+  pnp_confidence: 0.999
+  pnp_iterations: 100
+  R_output_from_pnp_camera:
+    - [1.0, 0.0, 0.0]
+    - [0.0, -1.0, 0.0]
+    - [0.0, 0.0, -1.0]
+
+velocity:
+  enabled: true
+  output_csv: velocity.csv
+
+output:
+  output_dir: outputs/evslam_vo_seq007
+  trajectory_csv: trajectory.csv
+  result_txt: result_seq007.txt

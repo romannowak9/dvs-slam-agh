@@ -143,7 +143,7 @@ def main() -> None:
             estimated=estimated,
             ground_truth=ground_truth,
             time_origin=time_origin,
-            estimated_values=estimated.velocities_camera[:, 1],
+            estimated_values=estimated.velocities_camera[:, 1],  # tu może minus
             gt_values=get_gt_values(ground_truth, "velocity", 1),
             title="Camera velocity vy(t)",
             ylabel="vy [m/s]",
@@ -157,7 +157,7 @@ def main() -> None:
             estimated=estimated,
             ground_truth=ground_truth,
             time_origin=time_origin,
-            estimated_values=estimated.velocities_camera[:, 2],
+            estimated_values=estimated.velocities_camera[:, 2],  # tu może minus
             gt_values=get_gt_values(ground_truth, "velocity", 2),
             title="Camera velocity vz(t)",
             ylabel="vz [m/s]",

@@ -265,6 +265,26 @@ python3 scripts/run_stereo_pnp_vo.py \
   --display
 ```
 
+## Align results to gt
+
+```bash
+python3 scripts/align_evslam_result_to_gt.py \
+  --estimate outputs/evslam_vo_seq007_try03/result_seq007.txt \
+  --gt /data/evSLAM/gt/seq007_test_gt.txt \
+  --output outputs/evslam_vo_seq007_try03/result_seq007_aligned_se3.txt \
+  --method se3  # or first_sample or sim3
+```
+
+Or with only first sample
+
+```bash
+python3 scripts/align_evslam_result_to_gt.py \
+  --estimate outputs/evslam_vo_seq007/result_seq007.txt \
+  --gt /data/evSLAM/gt/seq007_test_gt.txt \
+  --output outputs/evslam_vo_seq007/result_seq007_aligned_first_pose.txt \
+  --method first_pose
+```
+
 ## Plot trajectory
 
 ```bash
@@ -277,8 +297,8 @@ Or with gt:
 
 ```bash
 python3 scripts/plot_trajectory.py \
-  --trajectory outputs/evslam_vo_seq007/result_seq007.txt \
-  --output-dir outputs/evslam_vo_seq007/plots \
+  --trajectory outputs/evslam_vo_seq007/result_seq007_aligned_first_pose.txt \
+  --output-dir outputs/evslam_vo_seq007/plots_first_pose \
   --gt /data/evSLAM/gt/seq007_test_gt.txt
 ```
 
