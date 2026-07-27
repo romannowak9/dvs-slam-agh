@@ -131,6 +131,7 @@ def save_challenge_result(
 
     result_stats = write_result_from_reference_file(
         trajectory=pipeline.trajectory,
+        velocity=pipeline.velocity_trajectory,
         reference_path=reference_path,
         output_path=result_path,
         skip_out_of_range=True,

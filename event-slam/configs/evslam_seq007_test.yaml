@@ -59,6 +59,8 @@ pnp:
 velocity:
   enabled: true
   output_csv: velocity.csv
+  smoothing_window: 5
+  smoothing_poly_order: 2
 
 output:
   output_dir: outputs/evslam_vo_seq007

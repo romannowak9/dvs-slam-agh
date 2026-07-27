@@ -15,14 +15,15 @@ if SRC_PATH.exists():
 
 from event_slam.core.geometry import Pose, invert_transform, make_transform
 from event_slam.core.trajectory import Trajectory
+from event_slam.core.velocity import VelocityTrajectory
 from event_slam.io.result_writer import write_trajectory_at_timestamps
 
 
 def main() -> None:
     args = parse_args()
 
-    estimate = load_evslam_result_as_trajectory(args.estimate)
-    gt = load_evslam_result_as_trajectory(args.gt)
+    estimate, estimate_velocity = load_evslam_result(args.estimate)
+    gt, _ = load_evslam_result(args.gt)
 
     estimate_indices, gt_indices = match_timestamps(
         estimate.timestamps,
@@ -63,9 +64,16 @@ def main() -> None:
         T_gt_est=T_gt_est,
         scale=scale,
     )
+    aligned_velocity = apply_velocity_alignment(
+        trajectory=aligned,
+        velocity=estimate_velocity,
+        T_gt_est=T_gt_est,
+        scale=scale,
+    )
 
     write_trajectory_at_timestamps(
         trajectory=aligned,
+        velocity=aligned_velocity,
         timestamps=estimate.timestamps,
         output_path=args.output,
         skip_out_of_range=False,
@@ -143,36 +151,47 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_evslam_result_as_trajectory(path: Path) -> Trajectory:
+def load_evslam_result(path: Path) -> tuple:
     """
-    Load EvSLAM 11-column result as a Trajectory.
+    Load EvSLAM 11-column result as pose and velocity trajectories.
 
     Expected format:
         timestamp tx ty tz qx qy qz qw vx vy vz
 
-    Velocity columns are ignored here because result_writer.py recomputes
-    velocity from the aligned trajectory in a project-consistent way.
+    Velocity in the file is expressed in the camera frame. VelocityTrajectory
+    stores both world-frame and camera-frame velocity, so world-frame velocity
+    is reconstructed with:
+
+        v_W = R_W_C @ v_C
     """
     data = load_evslam_result_array(path)
 
     trajectory = Trajectory()
+    velocity = VelocityTrajectory()
 
     for row in data:
         timestamp = float(row[0])
         position = row[1:4]
         quat_xyzw = row[4:8]
+        velocity_camera = row[8:11]
 
         pose = Pose.from_quat_xyzw(
             q_xyzw=quat_xyzw,
             t=position,
         )
+        velocity_world = pose.R @ velocity_camera
 
         trajectory.append(
             timestamp=timestamp,
             pose=pose,
         )
+        velocity.append(
+            timestamp=timestamp,
+            velocity_world=velocity_world,
+            velocity_camera=velocity_camera,
+        )
 
-    return trajectory
+    return trajectory, velocity
 
 
 def load_evslam_result_array(path: Path) -> np.ndarray:
@@ -381,6 +400,40 @@ def apply_world_alignment(
         aligned.append(
             timestamp=sample.timestamp,
             pose=Pose(R=R_Wgt_C, t=t_Wgt_C),
+        )
+
+    return aligned
+
+
+def apply_velocity_alignment(
+    trajectory: Trajectory,
+    velocity: VelocityTrajectory,
+    T_gt_est: np.ndarray,
+    scale: float = 1.0,
+) -> VelocityTrajectory:
+    """
+    Apply the same world-frame alignment to linear velocity.
+
+    Translation does not affect velocity. For Sim(3), velocity is scaled by the
+    same scale as position.
+    """
+    if len(trajectory) != len(velocity):
+        raise ValueError(
+            "trajectory and velocity must have the same length, "
+            f"got {len(trajectory)} and {len(velocity)}"
+        )
+
+    aligned = VelocityTrajectory()
+    R_gt_est = T_gt_est[:3, :3]
+
+    for pose_sample, velocity_sample in zip(trajectory.samples, velocity.samples):
+        velocity_world = scale * (R_gt_est @ velocity_sample.velocity_world)
+        velocity_camera = pose_sample.pose.R.T @ velocity_world
+
+        aligned.append(
+            timestamp=pose_sample.timestamp,
+            velocity_world=velocity_world,
+            velocity_camera=velocity_camera,
         )
 
     return aligned
