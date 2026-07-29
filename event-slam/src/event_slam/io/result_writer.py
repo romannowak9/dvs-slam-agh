@@ -7,7 +7,7 @@ import numpy as np
 
 from event_slam.core.geometry import rotmat_to_quat_xyzw
 from event_slam.core.trajectory import Trajectory
-from event_slam.core.velocity import compute_velocity_trajectory
+from event_slam.core.velocity import VelocityTrajectory, world_to_camera_velocities
 
 
 @dataclass
@@ -54,6 +54,7 @@ def load_reference_timestamps(path) -> np.ndarray:
 
 def write_trajectory_at_timestamps(
     trajectory: Trajectory,
+    velocity: VelocityTrajectory,
     timestamps: np.ndarray,
     output_path,
     skip_out_of_range: bool = True,
@@ -69,6 +70,9 @@ def write_trajectory_at_timestamps(
     if trajectory.is_empty:
         raise ValueError("Cannot write result from an empty trajectory")
 
+    if velocity.is_empty:
+        raise ValueError("Cannot write result from an empty velocity trajectory")
+
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -80,23 +84,30 @@ def write_trajectory_at_timestamps(
         skip_out_of_range=skip_out_of_range,
     )
 
-    velocity = compute_velocity_trajectory(interpolated)
+    velocities_world = _interpolate_world_velocities(
+        velocity=velocity,
+        timestamps=interpolated.timestamps,
+    )
+    velocities_camera = world_to_camera_velocities(
+        trajectory=interpolated,
+        velocities_world=velocities_world,
+    )
 
     written_count = 0
     first_written_timestamp = np.nan
     last_written_timestamp = np.nan
 
     with open(output_path, "w", encoding="utf-8") as file:
-        for pose_sample, velocity_sample in zip(
+        for pose_sample, velocity_camera in zip(
             interpolated.samples,
-            velocity.samples,
+            velocities_camera,
         ):
             timestamp = pose_sample.timestamp
             pose = pose_sample.pose
 
             tx, ty, tz = pose.t
             qx, qy, qz, qw = rotmat_to_quat_xyzw(pose.R)
-            vx, vy, vz = velocity_sample.velocity_camera
+            vx, vy, vz = velocity_camera
 
             file.write(
                 f"{timestamp:.9f} "
@@ -122,6 +133,7 @@ def write_trajectory_at_timestamps(
 
 def write_result_from_reference_file(
     trajectory: Trajectory,
+    velocity: VelocityTrajectory,
     reference_path,
     output_path,
     skip_out_of_range: bool = True,
@@ -133,6 +145,7 @@ def write_result_from_reference_file(
 
     return write_trajectory_at_timestamps(
         trajectory=trajectory,
+        velocity=velocity,
         timestamps=timestamps,
         output_path=output_path,
         skip_out_of_range=skip_out_of_range,
@@ -167,3 +180,31 @@ def _interpolate_valid_poses(
         output.append(timestamp=timestamp, pose=pose)
 
     return output, skipped_count
+
+
+def _interpolate_world_velocities(
+    velocity: VelocityTrajectory,
+    timestamps: np.ndarray,
+) -> np.ndarray:
+    """
+    Linearly interpolate world-frame velocity to selected timestamps.
+    """
+    source_timestamps = velocity.timestamps
+    source_velocities = velocity.velocities_world
+    timestamps = np.asarray(timestamps, dtype=np.float64).reshape(-1)
+
+    if np.any(np.diff(source_timestamps) <= 0.0):
+        raise ValueError("Velocity timestamps must be strictly increasing")
+
+    if len(timestamps) == 0:
+        return np.empty((0, 3), dtype=np.float64)
+
+    if timestamps[0] < source_timestamps[0] or timestamps[-1] > source_timestamps[-1]:
+        raise ValueError("Requested timestamps are outside velocity range")
+
+    return np.column_stack(
+        [
+            np.interp(timestamps, source_timestamps, source_velocities[:, axis])
+            for axis in range(3)
+        ]
+    ).astype(np.float64)

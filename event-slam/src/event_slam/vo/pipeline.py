@@ -138,7 +138,9 @@ class EvSlamStereoVOPipeline:
         """
         Compute velocity from the current VO trajectory.
         """
-        self.velocity_trajectory = compute_velocity_trajectory(self.trajectory)
+        self.velocity_trajectory = compute_velocity_trajectory(self.trajectory,
+                                                               smoothing_window_size=self.velocity_cfg.get("smoothing_window", 1),
+                                                               smoothing_poly_order=self.velocity_cfg.get("smoothing_poly_order", 2))
         return self.velocity_trajectory
 
     def save_trajectory_output(self) -> tuple:
@@ -303,6 +305,7 @@ class EvSlamStereoVOPipeline:
             K=self.rectifier.K_left_rectified,
             P1=self.rectifier.P1,
             P2=self.rectifier.P2,
+            R_rect_left_from_left=self.rectifier.R1,
             feature_tracker_params=self._make_feature_tracker_params(),
             stereo_depth_params=self._make_stereo_depth_params(),
             **self._make_pnp_params(),
@@ -352,6 +355,7 @@ class EvSlamStereoVOPipeline:
             ),
             "pnp_confidence": float(self.pnp_cfg.get("pnp_confidence", 0.999)),
             "pnp_iterations": int(self.pnp_cfg.get("pnp_iterations", 100)),
+            "R_output_from_pnp_camera": self.pnp_cfg.get("R_output_from_pnp_camera"),
         }
 
     def _filter_window(self, window: StereoEventWindow) -> StereoEventWindow:

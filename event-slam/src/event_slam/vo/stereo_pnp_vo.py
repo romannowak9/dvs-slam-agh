@@ -80,6 +80,8 @@ class StereoPnPVO:
         K: np.ndarray,
         P1: np.ndarray,
         P2: np.ndarray,
+        R_rect_left_from_left=None,
+        R_output_from_pnp_camera=None,
         feature_tracker_params=None,
         stereo_depth_params=None,
         min_pnp_points: int = 20,
@@ -96,6 +98,9 @@ class StereoPnPVO:
         self.K = np.asarray(K, dtype=np.float64)
         self.P1 = np.asarray(P1, dtype=np.float64)
         self.P2 = np.asarray(P2, dtype=np.float64)
+        self.R_rect_left_from_left = np.asarray(R_rect_left_from_left, dtype=np.float64) if R_rect_left_from_left is not None else None
+        self.R_left_from_rect_left = self.R_rect_left_from_left.T if R_rect_left_from_left is not None else None
+        self.R_output_from_pnp_camera = np.asarray(R_output_from_pnp_camera, dtype=np.float64) if R_output_from_pnp_camera is not None else np.eye(3, dtype=np.float64)
 
         if self.K.shape != (3, 3):
             raise ValueError(f"K must have shape (3, 3), got {self.K.shape}")
@@ -105,6 +110,9 @@ class StereoPnPVO:
 
         if self.P2.shape != (3, 4):
             raise ValueError(f"P2 must have shape (3, 4), got {self.P2.shape}")
+
+        if self.R_rect_left_from_left is not None and self.R_rect_left_from_left.shape != (3, 3):
+            raise ValueError(f"R_rect_left_from_left must have shape (3, 3), got {self.R_rect_left_from_left.shape}")
 
         feature_tracker_params = feature_tracker_params or {}
         stereo_depth_params = stereo_depth_params or {}
@@ -143,7 +151,7 @@ class StereoPnPVO:
         self.initialized = False
         self.T_W_Cleft = np.eye(4, dtype=np.float64)
 
-        self.prev_points_3d = np.empty((0, 3), dtype=np.float64)
+        self.prev_points_3d_rect = np.empty((0, 3), dtype=np.float64)
 
         self.trajectory = Trajectory()
         self.results = []
@@ -166,7 +174,7 @@ class StereoPnPVO:
                 active_points=tracking_result.active_points,
             )
 
-            self.prev_points_3d = points_3d
+            self.prev_points_3d_rect = points_3d
             self.initialized = True
 
             result = StereoPnPVOResult(
@@ -270,7 +278,7 @@ class StereoPnPVO:
             active_points=tracking_result.active_points,
         )
 
-        self.prev_points_3d = points_3d
+        self.prev_points_3d_rect = points_3d
 
         return StereoPnPVOResult(
             timestamp=timestamp,
@@ -292,15 +300,15 @@ class StereoPnPVO:
         )
 
     def _make_pnp_correspondences(self, tracking_result) -> tuple:
-        if len(self.prev_points_3d) == 0:
+        if len(self.prev_points_3d_rect) == 0:
             return _empty_points3(), _empty_points2()
 
         status_mask = tracking_result.status_mask
 
-        if len(status_mask) != len(self.prev_points_3d):
+        if len(status_mask) != len(self.prev_points_3d_rect):
             return _empty_points3(), _empty_points2()
 
-        object_points = self.prev_points_3d[status_mask]
+        object_points = self.prev_points_3d_rect[status_mask]
         image_points = tracking_result.curr_points
 
         finite_mask = np.isfinite(object_points).all(axis=1)
@@ -389,10 +397,21 @@ class StereoPnPVO:
                 f"PnP inlier ratio too low: {inlier_ratio:.3f}",
             )
 
-        R_Ck_Cprev, _ = cv2.Rodrigues(rvec)
-        t_Ck_Cprev = tvec.reshape(3)
+        R_Ck_rect_Cprev_rect, _ = cv2.Rodrigues(rvec)
+        t_Ck_rect_Cprev_rect = tvec.reshape(3)
 
-        T_Ck_Cprev = make_transform(R_Ck_Cprev, t_Ck_Cprev)
+        T_Ck_rect_Cprev_rect = make_transform(
+            R_Ck_rect_Cprev_rect,
+            t_Ck_rect_Cprev_rect,
+        )
+
+        T_Ck_pnp_Cprev_pnp = self._rectified_motion_to_left_motion(
+            T_Ck_rect_Cprev_rect,
+        )
+
+        T_Ck_Cprev = self._pnp_motion_to_output_motion(
+            T_Ck_pnp_Cprev_pnp,
+        )
 
         error_mean, error_median = self._compute_reprojection_error(
             object_points=object_points[inlier_mask],
@@ -411,8 +430,8 @@ class StereoPnPVO:
                 f"PnP reprojection error too high: {error_median:.3f}",
             )
 
-        translation_step = float(np.linalg.norm(t_Ck_Cprev))
-        rotation_step_deg = _rotation_angle_deg(R_Ck_Cprev)
+        translation_step = float(np.linalg.norm(T_Ck_Cprev[:3, 3]))
+        rotation_step_deg = _rotation_angle_deg(T_Ck_Cprev[:3, :3])
 
         if translation_step > self.max_translation_step:
             return (
@@ -488,6 +507,53 @@ class StereoPnPVO:
             pose=Pose.from_matrix(result.T_W_Cleft),
         )
         self.results.append(result)
+
+    def _rectified_motion_to_left_motion(
+            self,
+            T_Ck_rect_Cprev_rect: np.ndarray,
+        ) -> np.ndarray:
+        """
+        Convert relative camera motion from rectified-left frame to original-left frame.
+
+        R_rect_left_from_left convention:
+            X_left_rect = R_rect_left_from_left @ X_left
+
+        solvePnP estimates:
+            X_Ck_rect = R_rect @ X_Cprev_rect + t_rect
+
+        After conversion:
+            X_Ck_left = R_left @ X_Cprev_left + t_left
+        """
+        R_rect = T_Ck_rect_Cprev_rect[:3, :3]
+        t_rect = T_Ck_rect_Cprev_rect[:3, 3]
+
+        R1 = self.R_rect_left_from_left
+        R1_inv = self.R_left_from_rect_left
+
+        R_left = R1_inv @ R_rect @ R1
+        t_left = R1_inv @ t_rect
+
+        return make_transform(R_left, t_left)
+
+    def _pnp_motion_to_output_motion(
+            self,
+            T_Ck_pnp_Cprev_pnp: np.ndarray,
+        ) -> np.ndarray:
+        """
+        Convert relative motion from the PnP camera frame to the output camera frame.
+
+        Convention:
+            X_output = C @ X_pnp
+        """
+        C = self.R_output_from_pnp_camera
+
+        R_pnp = T_Ck_pnp_Cprev_pnp[:3, :3]
+        t_pnp = T_Ck_pnp_Cprev_pnp[:3, 3]
+
+        R_output = C @ R_pnp @ C.T
+        t_output = C @ t_pnp
+
+        return make_transform(R_output, t_output)
 
 
 def _empty_points2() -> np.ndarray:
