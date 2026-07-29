@@ -279,9 +279,9 @@ Or with only first sample
 
 ```bash
 python3 scripts/align_evslam_result_to_gt.py \
-  --estimate outputs/evslam_vo_seq007/result_seq007.txt \
+  --estimate outputs/evslam_vo_seq007_/result_seq007.txt \
   --gt /data/evSLAM/gt/seq007_test_gt.txt \
-  --output outputs/evslam_vo_seq007/result_seq007_aligned_first_pose.txt \
+  --output outputs/evslam_vo_seq007_/result_seq007_aligned_first_pose.txt \
   --method first_pose
 ```
 
@@ -297,8 +297,8 @@ Or with gt:
 
 ```bash
 python3 scripts/plot_trajectory.py \
-  --trajectory outputs/evslam_vo_seq007/result_seq007_aligned_first_pose.txt \
-  --output-dir outputs/evslam_vo_seq007/plots_first_pose \
+  --trajectory outputs/evslam_vo_seq007_/result_seq007_aligned_first_pose.txt \
+  --output-dir outputs/evslam_vo_seq007_/plots_first_pose \
   --gt /data/evSLAM/gt/seq007_test_gt.txt
 ```
 
@@ -311,4 +311,15 @@ python3 scripts/evaluate_evslam_metrics.py \
   --estimate outputs/evslam_vo_seq007/result_seq007.txt \
   --gt /data/evSLAM/gt/seq007_test_gt.txt \
   --output outputs/evslam_vo_seq007/metrics.txt
+```
+
+## IMU Rotation varification
+
+```bash
+python3 scripts/verification//debug_imu_rotation.py \
+  --bag /data/evSLAM/seq007_test.bag \
+  --camera-calibration /data/evSLAM/mecanum_calibration/calib_results_cam_others.yaml \
+  --imu-calibration /data/evSLAM/mecanum_calibration/calib_results_imu_others.yaml \
+  --estimate outputs/evslam_vo_seq007_/result_seq007_aligned_first_pose.txt \
+  --csv outputs/evslam_vo_seq007_/imu_rotation_debug.csv
 ```
