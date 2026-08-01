@@ -20,6 +20,7 @@ from event_slam.calibration.kalibr_parser import (
 from event_slam.core.geometry import Pose
 from event_slam.core.imu import (
     camera_time_to_imu_time,
+    load_imu_gyro_from_evslam_reader,
     imu_rotation_between_camera_times,
     relative_camera_rotation_from_poses,
     rotation_angle_deg,
@@ -52,8 +53,8 @@ def main() -> None:
         )
 
     trajectory = load_evslam_result_as_trajectory(args.estimate)
-    imu_timestamps, angular_velocities = load_imu_gyro_from_bag(
-        bag_path=args.bag,
+    imu_timestamps, angular_velocities = load_imu_gyro_from_evslam_reader(
+        reader=EvSlamRosbagReader(bag_path=args.bag),
         imu_topic=imu_topic,
     )
 
@@ -197,34 +198,6 @@ def load_evslam_result_as_trajectory(path: Path) -> Trajectory:
     return trajectory
 
 
-def load_imu_gyro_from_bag(
-    bag_path: Path,
-    imu_topic: str,
-) -> tuple:
-    """
-    Load IMU gyroscope samples from an EvSLAM bag using the existing reader.
-    """
-    reader = EvSlamRosbagReader(bag_path)
-    timestamps = []
-    angular_velocities = []
-
-    for sample in reader.iter_imu_samples(topic=imu_topic):
-        timestamp, angular_velocity = _extract_imu_sample(sample)
-        timestamps.append(timestamp)
-        angular_velocities.append(angular_velocity)
-
-    if len(timestamps) < 2:
-        raise ValueError(
-            f"Need at least two IMU samples on topic {imu_topic}, "
-            f"got {len(timestamps)}"
-        )
-
-    return (
-        np.asarray(timestamps, dtype=np.float64),
-        np.asarray(angular_velocities, dtype=np.float64),
-    )
-
-
 def compute_rotation_diagnostics(
     trajectory: Trajectory,
     imu_timestamps: np.ndarray,
@@ -354,46 +327,6 @@ def save_csv(path: Path, rows: np.ndarray) -> None:
         ),
         comments="",
     )
-
-
-def _extract_imu_sample(sample) -> tuple:
-    timestamp = _read_timestamp(sample)
-    angular_velocity = _read_vector3_field(
-        sample=sample,
-        field_names=("angular_velocity", "gyro", "gyroscope"),
-    )
-
-    return timestamp, angular_velocity
-
-
-def _read_timestamp(sample) -> float:
-    for field_name in ("timestamp", "t", "time"):
-        if hasattr(sample, field_name):
-            return float(getattr(sample, field_name))
-
-    raise ValueError(f"Could not read timestamp from IMU sample: {sample}")
-
-
-def _read_vector3_field(sample, field_names) -> np.ndarray:
-    for field_name in field_names:
-        if hasattr(sample, field_name):
-            return _as_vector3(getattr(sample, field_name))
-
-    raise ValueError(
-        f"Could not find any of {field_names} in IMU sample: {sample}"
-    )
-
-
-def _as_vector3(value) -> np.ndarray:
-    if all(hasattr(value, attr) for attr in ("x", "y", "z")):
-        return np.array([value.x, value.y, value.z], dtype=np.float64)
-
-    vector = np.asarray(value, dtype=np.float64).reshape(-1)
-
-    if vector.shape != (3,):
-        raise ValueError(f"Expected a 3D vector, got shape {vector.shape}")
-
-    return vector
 
 
 if __name__ == "__main__":

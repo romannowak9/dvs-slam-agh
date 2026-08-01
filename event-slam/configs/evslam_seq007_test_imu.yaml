@@ -14,10 +14,14 @@ imu:
     enabled: true
     reference_time: middle
     time_bins: 32
-    gyro_bias: null
+
+  rotation_prior:
+    enabled: true
+    max_error_deg: 3.0
+    reject_bad_pnp: true
 
 processing:
-  time_window: 0.006
+  time_window: 0.012
   t_start: null
   t_end: null
   num_frames: 0
@@ -25,13 +29,13 @@ processing:
 aggregation:
   mode: exponential
   polarity_mode: both
-  tau: 0.01
+  tau: 0.012
 
 baf:
   enabled: true
   time_window: 0.01
   radius: 2
-  min_neighbors: 6
+  min_neighbors: 7
 
 rectification:
   alpha: 0.0

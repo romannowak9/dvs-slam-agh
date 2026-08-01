@@ -103,7 +103,7 @@ def main() -> None:
     processed_frames = 0
 
     for frame_index, window in enumerate(builder.iter_windows()):
-        if args.num_frames > 0 and processed_frames >= args.num_frames:
+        if args.num_frames > 0 and frame_index >= args.num_frames:
             break
 
         raw_left_count = len(window.left)

@@ -323,3 +323,42 @@ python3 scripts/verification//debug_imu_rotation.py \
   --estimate outputs/evslam_vo_seq007_/result_seq007_aligned_first_pose.txt \
   --csv outputs/evslam_vo_seq007_/imu_rotation_debug.csv
 ```
+
+## Event windows rotation compensation with IMU
+
+```bash
+python3 scripts/verification//debug_imu_motion_compensation.py \
+  --bag /data/evSLAM/seq001.bag \
+  --camera-calibration /data/evSLAM/drone_calibration/calib_results_cam_drone.yaml \
+  --imu-calibration /data/evSLAM/drone_calibration/calib_results_imu_drone.yaml \
+  --mode exponential \
+  --tau 0.02 \
+  --use-baf \
+  --baf-time-window 0.01 \
+  --baf-radius 2 \
+  --baf-min-neighbors 5 \
+  --num-frames 10 \
+  --time-window 0.02 \
+  --t-start 970 \
+  --save-preview \
+  --output-dir outputs/debug_imu_motion_compensation
+```
+
+```bash
+python3 scripts/verification/debug_imu_motion_compensation.py \
+  --bag /data/evSLAM/seq007_test.bag \
+  --camera-calibration /data/evSLAM/mecanum_calibration/calib_results_cam_others.yaml \
+  --imu-calibration /data/evSLAM/mecanum_calibration/calib_results_imu_others.yaml \
+  --mode exponential \
+  --tau 0.05 \
+  --use-baf \
+  --baf-time-window 0.01 \
+  --baf-radius 2 \
+  --baf-min-neighbors 5 \
+  --num-frames 10 \
+  --time-window 0.05 \
+  --save-preview \
+  --output-dir outputs/debug_imu_motion_compensation_seq007
+```
+
+or with --display
