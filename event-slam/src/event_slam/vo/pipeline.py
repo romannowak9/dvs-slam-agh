@@ -5,15 +5,27 @@ from pathlib import Path
 
 import numpy as np
 
-from event_slam.calibration.kalibr_parser import load_stereo_calibration
+from event_slam.calibration.kalibr_parser import (
+    load_imu_calibration,
+    load_stereo_calibration,
+)
 from event_slam.calibration.stereo_rectifier import StereoRectifier
+from event_slam.core.imu import (
+    imu_rotation_between_camera_times,
+    load_imu_gyro_from_evslam_reader,
+)
 from event_slam.core.types import StereoEventWindow
 from event_slam.core.velocity import compute_velocity_trajectory
 from event_slam.datasets.evslam_reader import EvSlamRosbagReader
 from event_slam.events.event_aggregator import EventFrameAggregator
 from event_slam.events.event_filter import BackgroundActivityFilter
 from event_slam.events.event_window import StereoEventWindowBuilder
+from event_slam.events.imu_motion_compensation import (
+    compensate_stereo_window_rotation,
+)
 from event_slam.vo.stereo_pnp_vo import StereoPnPVO
+from event_slam.core.geometry import as_float_array
+from event_slam.debug.visualization import format_value
 
 
 @dataclass
@@ -28,6 +40,10 @@ class EvSlamStereoVOSummary:
     median_inliers: float
     final_position: np.ndarray
     velocity_samples: int = 0
+    motion_compensated_frames: int = 0
+    motion_compensation_failed: int = 0
+    imu_prior_available_frames: int = 0
+    imu_rejected_steps: int = 0
 
 
 class EvSlamStereoVOPipeline:
@@ -39,8 +55,10 @@ class EvSlamStereoVOPipeline:
         rosbag reader
         -> stereo event windows
         -> optional background activity filtering
+        -> optional IMU rotational motion compensation
         -> event-frame aggregation
         -> stereo rectification
+        -> optional IMU rotation prior
         -> StereoPnPVO
         -> optional velocity post-processing
 
@@ -55,6 +73,9 @@ class EvSlamStereoVOPipeline:
         self.processing_cfg = self.config.get("processing", {})
         self.aggregation_cfg = self.config.get("aggregation", {})
         self.baf_cfg = self.config.get("baf", {})
+        self.imu_cfg = self.config.get("imu", {})
+        self.motion_compensation_cfg = self.imu_cfg.get("motion_compensation", {})
+        self.rotation_prior_cfg = self.imu_cfg.get("rotation_prior", {})
         self.rectification_cfg = self.config.get("rectification", {})
         self.feature_tracker_cfg = self.config.get("feature_tracker", {})
         self.stereo_depth_cfg = self.config.get("stereo_depth", {})
@@ -62,11 +83,29 @@ class EvSlamStereoVOPipeline:
         self.velocity_cfg = self.config.get("velocity", {})
         self.output_cfg = self.config.get("output", {})
 
+        R_output_from_pnp_camera = self.pnp_cfg.get("R_output_from_pnp_camera")
+        self.R_output_from_pnp_camera = as_float_array(
+            R_output_from_pnp_camera, (3, 3), "R_output_from_pnp_camera"
+        ) if R_output_from_pnp_camera is not None else None
+
         self.processed_frames = 0
         self.successful_steps = 0
         self.failed_frames = 0
+        self.motion_compensated_frames = 0
+        self.motion_compensation_failed = 0
+        self.imu_prior_available_frames = 0
+        self.imu_rejected_steps = 0
+
         self.results = []
         self.velocity_trajectory = None
+
+        self.imu_calibration = None
+        self.imu_timestamps = None
+        self.imu_angular_velocities = None
+        self.motion_compensation_enabled = False
+        self.rotation_prior_enabled = False
+        self.previous_timestamp = None
+        self.last_motion_compensation = None
 
         self._setup_modules()
 
@@ -100,6 +139,7 @@ class EvSlamStereoVOPipeline:
         Process one stereo event window.
         """
         window = self._filter_window(window)
+        window = self._compensate_window(window)
 
         stereo_frame = self.aggregator.aggregate_stereo_window(window)
 
@@ -109,13 +149,16 @@ class EvSlamStereoVOPipeline:
         )
 
         timestamp = 0.5 * (window.t_start + window.t_end)
+        imu_rotation_prior = self._make_imu_rotation_prior(timestamp)
 
         result = self.vo.process(
             left_rectified=left_rectified,
             right_rectified=right_rectified,
             timestamp=timestamp,
+            imu_rotation_prior=imu_rotation_prior,
         )
 
+        self.previous_timestamp = timestamp
         self.results.append(result)
         self.velocity_trajectory = None
         self.processed_frames += 1
@@ -124,6 +167,9 @@ class EvSlamStereoVOPipeline:
             self.successful_steps += 1
         else:
             self.failed_frames += 1
+
+        if result.imu_rejected:
+            self.imu_rejected_steps += 1
 
         self._log_frame(
             frame_index=frame_index,
@@ -138,9 +184,7 @@ class EvSlamStereoVOPipeline:
         """
         Compute velocity from the current VO trajectory.
         """
-        self.velocity_trajectory = compute_velocity_trajectory(self.trajectory,
-                                                               smoothing_window_size=self.velocity_cfg.get("smoothing_window", 1),
-                                                               smoothing_poly_order=self.velocity_cfg.get("smoothing_poly_order", 2))
+        self.velocity_trajectory = compute_velocity_trajectory(self.trajectory)
         return self.velocity_trajectory
 
     def save_trajectory_output(self) -> tuple:
@@ -228,6 +272,10 @@ class EvSlamStereoVOPipeline:
             median_inliers=median_inliers,
             final_position=final_position,
             velocity_samples=velocity_samples,
+            motion_compensated_frames=self.motion_compensated_frames,
+            motion_compensation_failed=self.motion_compensation_failed,
+            imu_prior_available_frames=self.imu_prior_available_frames,
+            imu_rejected_steps=self.imu_rejected_steps,
         )
 
     def print_summary(self) -> None:
@@ -242,8 +290,12 @@ class EvSlamStereoVOPipeline:
         print(f"processed_frames: {summary.processed_frames}")
         print(f"successful_steps: {summary.successful_steps}")
         print(f"failed_frames: {summary.failed_frames}")
-        print(f"median_inliers: {_format_value(summary.median_inliers)}")
+        print(f"median_inliers: {format_value(summary.median_inliers)}")
         print(f"velocity_samples: {summary.velocity_samples}")
+        print(f"motion_compensated_frames: {summary.motion_compensated_frames}")
+        print(f"motion_compensation_failed: {summary.motion_compensation_failed}")
+        print(f"imu_prior_available_frames: {summary.imu_prior_available_frames}")
+        print(f"imu_rejected_steps: {summary.imu_rejected_steps}")
         print(
             "final_position: "
             f"[{summary.final_position[0]:.6f}, "
@@ -252,8 +304,8 @@ class EvSlamStereoVOPipeline:
         )
 
     def _setup_modules(self) -> None:
-        calibration = load_stereo_calibration(self.dataset_cfg["camera_yaml"])
-        image_shape = calibration.left.image_shape
+        self.calibration = load_stereo_calibration(self.dataset_cfg["camera_yaml"])
+        image_shape = self.calibration.left.image_shape
 
         self.reader = EvSlamRosbagReader(
             bag_path=self.dataset_cfg["bag_path"],
@@ -277,7 +329,7 @@ class EvSlamStereoVOPipeline:
         )
 
         self.rectifier = StereoRectifier(
-            calibration=calibration,
+            calibration=self.calibration,
             image_shape=image_shape,
             alpha=float(self.rectification_cfg.get("alpha", 0.0)),
             interpolation=self.rectification_cfg.get("interpolation", "nearest"),
@@ -301,6 +353,8 @@ class EvSlamStereoVOPipeline:
                 min_neighbors=int(self.baf_cfg.get("min_neighbors", 5)),
             )
 
+        self._setup_imu()
+
         self.vo = StereoPnPVO(
             K=self.rectifier.K_left_rectified,
             P1=self.rectifier.P1,
@@ -309,6 +363,47 @@ class EvSlamStereoVOPipeline:
             feature_tracker_params=self._make_feature_tracker_params(),
             stereo_depth_params=self._make_stereo_depth_params(),
             **self._make_pnp_params(),
+        )
+
+    def _setup_imu(self) -> None:
+        imu_enabled = bool(self.imu_cfg.get("enabled", False))
+
+        self.motion_compensation_enabled = (
+            imu_enabled
+            and bool(self.motion_compensation_cfg.get("enabled", False))
+        )
+        self.rotation_prior_enabled = (
+            imu_enabled
+            and bool(self.rotation_prior_cfg.get("enabled", False))
+        )
+
+        if not self.motion_compensation_enabled and not self.rotation_prior_enabled:
+            return
+
+        imu_yaml = (
+            self.imu_cfg.get("calibration_yaml")
+            or self.dataset_cfg.get("imu_yaml")
+            or self.dataset_cfg.get("imu_calibration")
+        )
+
+        if imu_yaml is None:
+            raise ValueError(
+                "IMU is enabled, but IMU calibration YAML was not provided. "
+                "Use imu.calibration_yaml or dataset.imu_yaml."
+            )
+
+        self.imu_calibration = load_imu_calibration(imu_yaml)
+        imu_topic = self.imu_cfg.get("topic") or self.imu_calibration.topic
+
+        if imu_topic is None:
+            raise ValueError(
+                "IMU is enabled, but IMU topic was not provided and could not "
+                "be read from IMU calibration."
+            )
+
+        self.imu_timestamps, self.imu_angular_velocities = load_imu_gyro_from_evslam_reader(
+            reader = self.reader,
+            imu_topic=imu_topic,
         )
 
     def _make_feature_tracker_params(self) -> dict:
@@ -355,7 +450,13 @@ class EvSlamStereoVOPipeline:
             ),
             "pnp_confidence": float(self.pnp_cfg.get("pnp_confidence", 0.999)),
             "pnp_iterations": int(self.pnp_cfg.get("pnp_iterations", 100)),
-            "R_output_from_pnp_camera": self.pnp_cfg.get("R_output_from_pnp_camera"),
+            "R_output_from_pnp_camera": self.R_output_from_pnp_camera,
+            "imu_rotation_prior_max_error_deg": float(
+                self.rotation_prior_cfg.get("max_error_deg", 3.0)
+            ),
+            "imu_rotation_prior_reject_bad_pnp": bool(
+                self.rotation_prior_cfg.get("reject_bad_pnp", False)
+            ),
         }
 
     def _filter_window(self, window: StereoEventWindow) -> StereoEventWindow:
@@ -369,6 +470,65 @@ class EvSlamStereoVOPipeline:
             right=self.right_baf.filter(window.right),
         )
 
+    def _compensate_window(self, window: StereoEventWindow) -> StereoEventWindow:
+        self.last_motion_compensation = None
+
+        if not self.motion_compensation_enabled:
+            return window
+
+        try:
+            result = compensate_stereo_window_rotation(
+                window=window,
+                left_camera=self.calibration.left,
+                right_camera=self.calibration.right,
+                imu_timestamps=self.imu_timestamps,
+                angular_velocities=self.imu_angular_velocities,
+                T_C_left_imu=self.calibration.T_C_left_imu,
+                T_C_right_imu=self.calibration.T_C_right_imu,
+                timeshift_left_imu=self.calibration.timeshift_left_imu,
+                timeshift_right_imu=self.calibration.timeshift_right_imu,
+                imu_time_offset=self.imu_calibration.time_offset or 0.0,
+                reference_time=self.motion_compensation_cfg.get(
+                    "reference_time",
+                    "middle",
+                ),
+                num_time_bins=int(self.motion_compensation_cfg.get("time_bins", 32)),
+            )
+        except ValueError as exc:
+            self.motion_compensation_failed += 1
+            print(f"IMU motion compensation skipped: {exc}")
+            return window
+
+        self.last_motion_compensation = result
+        self.motion_compensated_frames += 1
+
+        return result.window
+
+    def _make_imu_rotation_prior(self, timestamp: float):
+        if not self.rotation_prior_enabled:
+            return None
+
+        if self.previous_timestamp is None:
+            return None
+
+        try:
+            R_imu = imu_rotation_between_camera_times(
+                imu_timestamps=self.imu_timestamps,
+                angular_velocities=self.imu_angular_velocities,
+                camera_start_time=self.previous_timestamp,
+                camera_end_time=timestamp,
+                T_C_imu=self.calibration.T_C_left_imu,
+                timeshift_cam_imu=self.calibration.timeshift_left_imu,
+                imu_time_offset=self.imu_calibration.time_offset or 0.0,
+                R_output_from_camera=self.R_output_from_pnp_camera,
+            )
+        except ValueError:
+            return None
+
+        self.imu_prior_available_frames += 1
+
+        return R_imu
+
     def _log_frame(
         self,
         frame_index: int,
@@ -377,17 +537,32 @@ class EvSlamStereoVOPipeline:
         result,
     ) -> None:
         t = result.T_W_Cleft[:3, 3]
+        motion_text = ""
+
+        if self.last_motion_compensation is not None:
+            left_stats = self.last_motion_compensation.left_stats
+            right_stats = self.last_motion_compensation.right_stats
+            motion_text = (
+                f"mc_left={left_stats.output_count}/{left_stats.input_count}, "
+                f"mc_right={right_stats.output_count}/{right_stats.input_count}, "
+            )
 
         print(
             f"frame {frame_index:05d}: "
             f"timestamp={timestamp:.9f}, "
             f"events_left={len(window.left)}, "
             f"events_right={len(window.right)}, "
+            f"{motion_text}"
             f"success={result.success}, "
             f"tracks={result.track_count}, "
             f"pnp={result.pnp_point_count}, "
             f"inliers={result.pnp_inlier_count}, "
-            f"err_med={_format_value(result.reprojection_error_median)}, "
+            f"err_med={format_value(result.reprojection_error_median)}, "
+            f"pnp_rot={format_value(result.pnp_rotation_step_deg)}, "
+            f"imu_rot={format_value(result.imu_rotation_step_deg)}, "
+            f"pnp_imu_err={format_value(result.pnp_imu_rotation_error_deg)}, "
+            f"imu_ok={result.imu_rotation_consistent}, "
+            f"imu_rejected={result.imu_rejected}, "
             f"depth={result.depth_count}, "
             f"pos=[{t[0]:.3f}, {t[1]:.3f}, {t[2]:.3f}], "
             f"msg={result.message}"
@@ -401,18 +576,3 @@ def _resolve_output_path(output_dir: Path, path_value) -> Path:
         return path
 
     return output_dir / path
-
-
-def _format_value(value) -> str:
-    if value is None:
-        return "None"
-
-    try:
-        value = float(value)
-    except (TypeError, ValueError):
-        return str(value)
-
-    if not np.isfinite(value):
-        return "nan"
-
-    return f"{value:.3f}"

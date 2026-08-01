@@ -5,8 +5,11 @@ from dataclasses import dataclass, field
 import numpy as np
 
 
-def _as_float_array(array: np.ndarray, shape: tuple[int, ...], name: str) -> np.ndarray:
-    arr = np.asarray(array, dtype=np.float64)
+def as_float_array(array: np.ndarray, shape: tuple[int, ...], name: str) -> np.ndarray:
+    if shape == (3,) and all(hasattr(array, attr) for attr in ("x", "y", "z")):
+        arr = np.array([array.x, array.y, array.z], dtype=np.float64)
+    else:
+        arr = np.asarray(array, dtype=np.float64)
 
     if arr.shape != shape:
         raise ValueError(f"{name} must have shape {shape}, got {arr.shape}")
@@ -21,7 +24,7 @@ def skew(v: np.ndarray) -> np.ndarray:
     This is useful for cross products and later for epipolar geometry,
     Lie algebra operations and Jacobians.
     """
-    v = _as_float_array(v, (3,), "v")
+    v = as_float_array(v, (3,), "v")
 
     return np.array(
         [
@@ -33,6 +36,32 @@ def skew(v: np.ndarray) -> np.ndarray:
     )
 
 
+def rotvec_to_rotmat(rotation_vector: np.ndarray) -> np.ndarray:
+    """
+    Convert an axis-angle rotation vector to a rotation matrix.
+
+    The input is a rotation vector:
+        rotation_vector = axis * angle
+
+    where the vector direction is the rotation axis and its norm is the
+    rotation angle in radians.
+    """
+    rotation_vector = as_float_array(rotation_vector, (3,), "rotation_vector")
+    angle = float(np.linalg.norm(rotation_vector))
+
+    if angle < 1e-12:
+        return np.eye(3, dtype=np.float64) + skew(rotation_vector)
+
+    axis = rotation_vector / angle
+    K = skew(axis)
+
+    return (
+        np.eye(3, dtype=np.float64)
+        + np.sin(angle) * K
+        + (1.0 - np.cos(angle)) * (K @ K)
+    )
+
+
 def make_transform(R: np.ndarray, t: np.ndarray) -> np.ndarray:
     """
     Build an SE(3) homogeneous transform:
@@ -40,8 +69,8 @@ def make_transform(R: np.ndarray, t: np.ndarray) -> np.ndarray:
         T = [R t]
             [0 1]
     """
-    R = _as_float_array(R, (3, 3), "R")
-    t = _as_float_array(t, (3,), "t")
+    R = as_float_array(R, (3, 3), "R")
+    t = as_float_array(t, (3,), "t")
 
     T = np.eye(4, dtype=np.float64)
     T[:3, :3] = R
@@ -54,7 +83,7 @@ def invert_transform(T: np.ndarray) -> np.ndarray:
     """
     Invert an SE(3) homogeneous transform.
     """
-    T = _as_float_array(T, (4, 4), "T")
+    T = as_float_array(T, (4, 4), "T")
 
     R = T[:3, :3]
     t = T[:3, 3]
@@ -80,7 +109,7 @@ def transform_points(T: np.ndarray, points: np.ndarray) -> np.ndarray:
     np.ndarray
         Transformed points with the same point layout as the input.
     """
-    T = _as_float_array(T, (4, 4), "T")
+    T = as_float_array(T, (4, 4), "T")
     pts = np.asarray(points, dtype=np.float64)
 
     single_point = pts.ndim == 1
@@ -124,7 +153,7 @@ def quat_xyzw_normalize(q: np.ndarray) -> np.ndarray:
     """
     Normalize a quaternion stored as [qx, qy, qz, qw].
     """
-    q = _as_float_array(q, (4,), "q")
+    q = as_float_array(q, (4,), "q")
 
     norm = np.linalg.norm(q)
     if norm < 1e-12:
@@ -163,7 +192,7 @@ def rotmat_to_quat_xyzw(R: np.ndarray) -> np.ndarray:
     """
     Convert a 3x3 rotation matrix to a quaternion [qx, qy, qz, qw].
     """
-    R = _as_float_array(R, (3, 3), "R")
+    R = as_float_array(R, (3, 3), "R")
 
     trace = np.trace(R)
 
@@ -244,8 +273,8 @@ class Pose:
     t: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=np.float64))
 
     def __post_init__(self) -> None:
-        self.R = _as_float_array(self.R, (3, 3), "R")
-        self.t = _as_float_array(self.t, (3,), "t")
+        self.R = as_float_array(self.R, (3, 3), "R")
+        self.t = as_float_array(self.t, (3,), "t")
 
     @classmethod
     def identity(cls) -> Pose:
@@ -253,7 +282,7 @@ class Pose:
 
     @classmethod
     def from_matrix(cls, T_W_C: np.ndarray) -> Pose:
-        T_W_C = _as_float_array(T_W_C, (4, 4), "T_W_C")
+        T_W_C = as_float_array(T_W_C, (4, 4), "T_W_C")
         return cls(R=T_W_C[:3, :3], t=T_W_C[:3, 3])
 
     @classmethod

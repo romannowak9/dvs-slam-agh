@@ -11,6 +11,7 @@ from event_slam.core.geometry import (
     make_transform,
     rotmat_to_quat_xyzw,
 )
+from event_slam.core.imu import rotation_angle_deg, rotation_error_deg
 from event_slam.core.trajectory import Trajectory
 from event_slam.vo.feature_tracker import FeatureTracker
 from event_slam.vo.stereo_depth import StereoDepthEstimator
@@ -33,6 +34,12 @@ class StereoPnPVOResult:
 
     reprojection_error_mean: float = np.nan
     reprojection_error_median: float = np.nan
+
+    pnp_rotation_step_deg: float = np.nan
+    imu_rotation_step_deg: float = np.nan
+    pnp_imu_rotation_error_deg: float = np.nan
+    imu_rotation_consistent: bool = False
+    imu_rejected: bool = False
 
     redetected: bool = False
     reinitialized: bool = False
@@ -81,7 +88,6 @@ class StereoPnPVO:
         P1: np.ndarray,
         P2: np.ndarray,
         R_rect_left_from_left=None,
-        R_output_from_pnp_camera=None,
         feature_tracker_params=None,
         stereo_depth_params=None,
         min_pnp_points: int = 20,
@@ -94,13 +100,31 @@ class StereoPnPVO:
         pnp_confidence: float = 0.999,
         pnp_iterations: int = 100,
         pnp_flags: int = cv2.SOLVEPNP_ITERATIVE,
+        R_output_from_pnp_camera=None,
+        imu_rotation_prior_max_error_deg: float = 3.0,
+        imu_rotation_prior_reject_bad_pnp: bool = False,
     ) -> None:
         self.K = np.asarray(K, dtype=np.float64)
         self.P1 = np.asarray(P1, dtype=np.float64)
         self.P2 = np.asarray(P2, dtype=np.float64)
-        self.R_rect_left_from_left = np.asarray(R_rect_left_from_left, dtype=np.float64) if R_rect_left_from_left is not None else None
-        self.R_left_from_rect_left = self.R_rect_left_from_left.T if R_rect_left_from_left is not None else None
-        self.R_output_from_pnp_camera = np.asarray(R_output_from_pnp_camera, dtype=np.float64) if R_output_from_pnp_camera is not None else np.eye(3, dtype=np.float64)
+
+        if R_rect_left_from_left is None:
+            self.R_rect_left_from_left = np.eye(3, dtype=np.float64)
+        else:
+            self.R_rect_left_from_left = np.asarray(
+                R_rect_left_from_left,
+                dtype=np.float64,
+            )
+
+        self.R_left_from_rect_left = self.R_rect_left_from_left.T
+
+        if R_output_from_pnp_camera is None:
+            self.R_output_from_pnp_camera = np.eye(3, dtype=np.float64)
+        else:
+            self.R_output_from_pnp_camera = np.asarray(
+                R_output_from_pnp_camera,
+                dtype=np.float64,
+            )
 
         if self.K.shape != (3, 3):
             raise ValueError(f"K must have shape (3, 3), got {self.K.shape}")
@@ -111,8 +135,17 @@ class StereoPnPVO:
         if self.P2.shape != (3, 4):
             raise ValueError(f"P2 must have shape (3, 4), got {self.P2.shape}")
 
-        if self.R_rect_left_from_left is not None and self.R_rect_left_from_left.shape != (3, 3):
-            raise ValueError(f"R_rect_left_from_left must have shape (3, 3), got {self.R_rect_left_from_left.shape}")
+        if self.R_rect_left_from_left.shape != (3, 3):
+            raise ValueError(
+                "R_rect_left_from_left must have shape "
+                f"(3, 3), got {self.R_rect_left_from_left.shape}"
+            )
+
+        if self.R_output_from_pnp_camera.shape != (3, 3):
+            raise ValueError(
+                "R_output_from_pnp_camera must have shape "
+                f"(3, 3), got {self.R_output_from_pnp_camera.shape}"
+            )
 
         feature_tracker_params = feature_tracker_params or {}
         stereo_depth_params = stereo_depth_params or {}
@@ -138,6 +171,13 @@ class StereoPnPVO:
         self.pnp_iterations = int(pnp_iterations)
         self.pnp_flags = int(pnp_flags)
 
+        self.imu_rotation_prior_max_error_deg = float(
+            imu_rotation_prior_max_error_deg
+        )
+        self.imu_rotation_prior_reject_bad_pnp = bool(
+            imu_rotation_prior_reject_bad_pnp
+        )
+
         self.dist_coeffs = np.zeros((4, 1), dtype=np.float64)
 
         self.reset()
@@ -161,6 +201,7 @@ class StereoPnPVO:
         left_rectified: np.ndarray,
         right_rectified: np.ndarray,
         timestamp: float,
+        imu_rotation_prior: np.ndarray = None,
     ) -> StereoPnPVOResult:
         """
         Process one rectified stereo pair.
@@ -196,6 +237,7 @@ class StereoPnPVO:
             right_rectified=right_rectified,
             timestamp=float(timestamp),
             tracking_result=tracking_result,
+            imu_rotation_prior=imu_rotation_prior,
         )
 
         self._append_result(result)
@@ -212,7 +254,10 @@ class StereoPnPVO:
             file.write(
                 "timestamp,success,tx,ty,tz,qx,qy,qz,qw,"
                 "track_count,pnp_point_count,pnp_inlier_count,"
-                "reprojection_error_mean,reprojection_error_median,message\n"
+                "reprojection_error_mean,reprojection_error_median,"
+                "pnp_rotation_step_deg,imu_rotation_step_deg,"
+                "pnp_imu_rotation_error_deg,imu_rotation_consistent,"
+                "imu_rejected,message\n"
             )
 
             for result in self.results:
@@ -230,6 +275,11 @@ class StereoPnPVO:
                     f"{result.pnp_inlier_count},"
                     f"{result.reprojection_error_mean:.9f},"
                     f"{result.reprojection_error_median:.9f},"
+                    f"{result.pnp_rotation_step_deg:.9f},"
+                    f"{result.imu_rotation_step_deg:.9f},"
+                    f"{result.pnp_imu_rotation_error_deg:.9f},"
+                    f"{int(result.imu_rotation_consistent)},"
+                    f"{int(result.imu_rejected)},"
                     f"{_csv_safe(result.message)}\n"
                 )
 
@@ -239,6 +289,7 @@ class StereoPnPVO:
         right_rectified: np.ndarray,
         timestamp: float,
         tracking_result,
+        imu_rotation_prior: np.ndarray = None,
     ) -> StereoPnPVOResult:
         pnp_object_points, pnp_image_points = self._make_pnp_correspondences(
             tracking_result=tracking_result,
@@ -251,6 +302,12 @@ class StereoPnPVO:
         reprojection_error_mean = np.nan
         reprojection_error_median = np.nan
 
+        pnp_rotation_step_deg = np.nan
+        imu_rotation_step_deg = np.nan
+        pnp_imu_rotation_error_deg = np.nan
+        imu_rotation_consistent = False
+        imu_rejected = False
+
         pnp_inlier_points_curr = np.empty((0, 2), dtype=np.float32)
 
         if len(pnp_object_points) >= self.min_pnp_points:
@@ -260,10 +317,16 @@ class StereoPnPVO:
                 inlier_mask,
                 reprojection_error_mean,
                 reprojection_error_median,
+                pnp_rotation_step_deg,
+                imu_rotation_step_deg,
+                pnp_imu_rotation_error_deg,
+                imu_rotation_consistent,
+                imu_rejected,
                 message,
             ) = self._solve_pnp(
                 object_points=pnp_object_points,
                 image_points=pnp_image_points,
+                imu_rotation_prior=imu_rotation_prior,
             )
 
             pnp_inlier_count = int(np.count_nonzero(inlier_mask))
@@ -290,6 +353,11 @@ class StereoPnPVO:
             pnp_inlier_count=pnp_inlier_count,
             reprojection_error_mean=reprojection_error_mean,
             reprojection_error_median=reprojection_error_median,
+            pnp_rotation_step_deg=pnp_rotation_step_deg,
+            imu_rotation_step_deg=imu_rotation_step_deg,
+            pnp_imu_rotation_error_deg=pnp_imu_rotation_error_deg,
+            imu_rotation_consistent=imu_rotation_consistent,
+            imu_rejected=imu_rejected,
             redetected=tracking_result.redetected,
             reinitialized=False,
             depth_count=depth_count,
@@ -327,14 +395,22 @@ class StereoPnPVO:
         self,
         object_points: np.ndarray,
         image_points: np.ndarray,
+        imu_rotation_prior: np.ndarray = None,
     ) -> tuple:
+        empty_inliers = np.zeros(len(object_points), dtype=np.bool_)
+
         if len(object_points) < 6:
             return (
                 False,
                 np.eye(4, dtype=np.float64),
-                np.zeros(len(object_points), dtype=np.bool_),
+                empty_inliers,
                 np.nan,
                 np.nan,
+                np.nan,
+                np.nan,
+                np.nan,
+                False,
+                False,
                 f"too few PnP points: {len(object_points)}",
             )
 
@@ -353,9 +429,14 @@ class StereoPnPVO:
             return (
                 False,
                 np.eye(4, dtype=np.float64),
-                np.zeros(len(object_points), dtype=np.bool_),
+                empty_inliers,
                 np.nan,
                 np.nan,
+                np.nan,
+                np.nan,
+                np.nan,
+                False,
+                False,
                 "solvePnPRansac cv2 error",
             )
 
@@ -363,9 +444,14 @@ class StereoPnPVO:
             return (
                 False,
                 np.eye(4, dtype=np.float64),
-                np.zeros(len(object_points), dtype=np.bool_),
+                empty_inliers,
                 np.nan,
                 np.nan,
+                np.nan,
+                np.nan,
+                np.nan,
+                False,
+                False,
                 "solvePnPRansac failed",
             )
 
@@ -384,6 +470,11 @@ class StereoPnPVO:
                 inlier_mask,
                 np.nan,
                 np.nan,
+                np.nan,
+                np.nan,
+                np.nan,
+                False,
+                False,
                 f"too few PnP inliers: {inlier_count}",
             )
 
@@ -394,6 +485,11 @@ class StereoPnPVO:
                 inlier_mask,
                 np.nan,
                 np.nan,
+                np.nan,
+                np.nan,
+                np.nan,
+                False,
+                False,
                 f"PnP inlier ratio too low: {inlier_ratio:.3f}",
             )
 
@@ -405,13 +501,10 @@ class StereoPnPVO:
             t_Ck_rect_Cprev_rect,
         )
 
-        T_Ck_pnp_Cprev_pnp = self._rectified_motion_to_left_motion(
+        T_Ck_Cprev = self._rectified_motion_to_left_motion(
             T_Ck_rect_Cprev_rect,
         )
-
-        T_Ck_Cprev = self._pnp_motion_to_output_motion(
-            T_Ck_pnp_Cprev_pnp,
-        )
+        T_Ck_Cprev = self._apply_output_frame_correction(T_Ck_Cprev)
 
         error_mean, error_median = self._compute_reprojection_error(
             object_points=object_points[inlier_mask],
@@ -420,37 +513,93 @@ class StereoPnPVO:
             tvec=tvec,
         )
 
+        pnp_rotation_step_deg = rotation_angle_deg(T_Ck_Cprev[:3, :3])
+        imu_rotation_step_deg = np.nan
+        pnp_imu_rotation_error_deg = np.nan
+        imu_rotation_consistent = False
+
+        if imu_rotation_prior is not None:
+            imu_rotation_prior = np.asarray(imu_rotation_prior, dtype=np.float64)
+
+            if imu_rotation_prior.shape == (3, 3):
+                imu_rotation_step_deg = rotation_angle_deg(imu_rotation_prior)
+                pnp_imu_rotation_error_deg = rotation_error_deg(
+                    T_Ck_Cprev[:3, :3],
+                    imu_rotation_prior,
+                )
+                imu_rotation_consistent = (
+                    pnp_imu_rotation_error_deg
+                    <= self.imu_rotation_prior_max_error_deg
+                )
+
         if error_median > self.max_pnp_reprojection_median:
             return (
                 False,
-                np.eye(4, dtype=np.float64),
+                T_Ck_Cprev,
                 inlier_mask,
                 error_mean,
                 error_median,
+                pnp_rotation_step_deg,
+                imu_rotation_step_deg,
+                pnp_imu_rotation_error_deg,
+                imu_rotation_consistent,
+                False,
                 f"PnP reprojection error too high: {error_median:.3f}",
             )
 
         translation_step = float(np.linalg.norm(T_Ck_Cprev[:3, 3]))
-        rotation_step_deg = _rotation_angle_deg(T_Ck_Cprev[:3, :3])
 
         if translation_step > self.max_translation_step:
             return (
                 False,
-                np.eye(4, dtype=np.float64),
+                T_Ck_Cprev,
                 inlier_mask,
                 error_mean,
                 error_median,
+                pnp_rotation_step_deg,
+                imu_rotation_step_deg,
+                pnp_imu_rotation_error_deg,
+                imu_rotation_consistent,
+                False,
                 f"translation step too large: {translation_step:.3f}",
             )
 
-        if rotation_step_deg > self.max_rotation_step_deg:
+        if pnp_rotation_step_deg > self.max_rotation_step_deg:
             return (
                 False,
-                np.eye(4, dtype=np.float64),
+                T_Ck_Cprev,
                 inlier_mask,
                 error_mean,
                 error_median,
-                f"rotation step too large: {rotation_step_deg:.3f}",
+                pnp_rotation_step_deg,
+                imu_rotation_step_deg,
+                pnp_imu_rotation_error_deg,
+                imu_rotation_consistent,
+                False,
+                f"rotation step too large: {pnp_rotation_step_deg:.3f}",
+            )
+
+        if (
+            self.imu_rotation_prior_reject_bad_pnp
+            and imu_rotation_prior is not None
+            and np.isfinite(pnp_imu_rotation_error_deg)
+            and not imu_rotation_consistent
+        ):
+            return (
+                False,
+                T_Ck_Cprev,
+                inlier_mask,
+                error_mean,
+                error_median,
+                pnp_rotation_step_deg,
+                imu_rotation_step_deg,
+                pnp_imu_rotation_error_deg,
+                imu_rotation_consistent,
+                True,
+                (
+                    "PnP rejected by IMU rotation prior: "
+                    f"{pnp_imu_rotation_error_deg:.3f} deg"
+                ),
             )
 
         return (
@@ -459,6 +608,11 @@ class StereoPnPVO:
             inlier_mask,
             error_mean,
             error_median,
+            pnp_rotation_step_deg,
+            imu_rotation_step_deg,
+            pnp_imu_rotation_error_deg,
+            imu_rotation_consistent,
+            False,
             "ok",
         )
 
@@ -509,9 +663,9 @@ class StereoPnPVO:
         self.results.append(result)
 
     def _rectified_motion_to_left_motion(
-            self,
-            T_Ck_rect_Cprev_rect: np.ndarray,
-        ) -> np.ndarray:
+        self,
+        T_Ck_rect_Cprev_rect: np.ndarray,
+    ) -> np.ndarray:
         """
         Convert relative camera motion from rectified-left frame to original-left frame.
 
@@ -535,25 +689,13 @@ class StereoPnPVO:
 
         return make_transform(R_left, t_left)
 
-    def _pnp_motion_to_output_motion(
-            self,
-            T_Ck_pnp_Cprev_pnp: np.ndarray,
-        ) -> np.ndarray:
-        """
-        Convert relative motion from the PnP camera frame to the output camera frame.
-
-        Convention:
-            X_output = C @ X_pnp
-        """
+    def _apply_output_frame_correction(self, T_camera: np.ndarray) -> np.ndarray:
         C = self.R_output_from_pnp_camera
 
-        R_pnp = T_Ck_pnp_Cprev_pnp[:3, :3]
-        t_pnp = T_Ck_pnp_Cprev_pnp[:3, 3]
+        R = C @ T_camera[:3, :3] @ C.T
+        t = C @ T_camera[:3, 3]
 
-        R_output = C @ R_pnp @ C.T
-        t_output = C @ t_pnp
-
-        return make_transform(R_output, t_output)
+        return make_transform(R, t)
 
 
 def _empty_points2() -> np.ndarray:
@@ -562,13 +704,6 @@ def _empty_points2() -> np.ndarray:
 
 def _empty_points3() -> np.ndarray:
     return np.empty((0, 3), dtype=np.float64)
-
-
-def _rotation_angle_deg(R: np.ndarray) -> float:
-    cos_angle = 0.5 * (float(np.trace(R)) - 1.0)
-    cos_angle = float(np.clip(cos_angle, -1.0, 1.0))
-
-    return float(np.degrees(np.arccos(cos_angle)))
 
 
 def _csv_safe(value: str) -> str:

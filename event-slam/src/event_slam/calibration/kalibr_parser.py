@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import List, Optional, Tuple
 
 import numpy as np
 import yaml
@@ -9,7 +10,7 @@ import yaml
 from event_slam.core.camera import CameraModel, StereoCalibration
 
 
-@dataclass()
+@dataclass
 class ImuCalibration:
     """
     Minimal IMU calibration container.
@@ -20,22 +21,38 @@ class ImuCalibration:
     """
 
     name: str
-    topic: str | None = None
+    topic: Optional[str] = None
 
-    update_rate_hz: float | None = None
+    model: Optional[str] = None
+    time_offset: Optional[float] = None
+    update_rate_hz: Optional[float] = None
 
-    accelerometer_noise_density: float | None = None
-    accelerometer_random_walk: float | None = None
+    accelerometer_noise_density: Optional[float] = None
+    accelerometer_random_walk: Optional[float] = None
 
-    gyroscope_noise_density: float | None = None
-    gyroscope_random_walk: float | None = None
+    gyroscope_noise_density: Optional[float] = None
+    gyroscope_random_walk: Optional[float] = None
 
-    T_imu_body: np.ndarray | None = None
+    T_body_imu: Optional[np.ndarray] = None  # maps IMU frame to body frame
 
-    raw: dict | None = None
+    raw: Optional[dict] = None
+
+    @property
+    def T_imu_body(self) -> Optional[np.ndarray]:
+        """
+        Backward-compatible alias for older code.
+
+        The stored transform maps IMU frame to body frame, so according to the
+        T_A_B convention the preferred name is T_body_imu.
+        """
+        return self.T_body_imu
+
+    @T_imu_body.setter
+    def T_imu_body(self, value: Optional[np.ndarray]) -> None:
+        self.T_body_imu = value
 
 
-@dataclass()
+@dataclass
 class EvSlamCalibration:
     """
     High-level calibration container for the EvSLAM stereo event setup.
@@ -45,13 +62,13 @@ class EvSlamCalibration:
     """
 
     stereo: StereoCalibration
-    imu: ImuCalibration | None = None
+    imu: Optional[ImuCalibration] = None
 
-    camera_yaml_path: Path | None = None
-    imu_yaml_path: Path | None = None
+    camera_yaml_path: Optional[Path] = None
+    imu_yaml_path: Optional[Path] = None
 
 
-def load_stereo_calibration(camera_yaml_path: str | Path) -> StereoCalibration:
+def load_stereo_calibration(camera_yaml_path) -> StereoCalibration:
     """
     Load a Kalibr-style camera YAML file and return a StereoCalibration object.
 
@@ -110,7 +127,7 @@ def load_stereo_calibration(camera_yaml_path: str | Path) -> StereoCalibration:
     )
 
 
-def load_imu_calibration(imu_yaml_path: str | Path) -> ImuCalibration:
+def load_imu_calibration(imu_yaml_path) -> ImuCalibration:
     """
     Load a Kalibr-style IMU YAML file and return a minimal ImuCalibration object.
 
@@ -126,6 +143,11 @@ def load_imu_calibration(imu_yaml_path: str | Path) -> ImuCalibration:
     return ImuCalibration(
         name=imu_key,
         topic=_optional_string(imu_data, "rostopic"),
+        model=_optional_string(imu_data, "model"),
+        time_offset=_optional_float_any(
+            imu_data,
+            ["time_offset"],
+        ),
         update_rate_hz=_optional_float_any(
             imu_data,
             ["update_rate", "rate_hz", "frequency"],
@@ -146,17 +168,17 @@ def load_imu_calibration(imu_yaml_path: str | Path) -> ImuCalibration:
             imu_data,
             ["gyroscope_random_walk", "gyro_random_walk"],
         ),
-        T_imu_body=_optional_matrix4x4_any(
+        T_body_imu=_optional_matrix4x4_any(
             imu_data,
-            ["T_i_b", "T_imu_body", "T_imu_body_calib"],
+            ["T_i_b", "T_body_imu", "T_imu_body", "T_imu_body_calib"],
         ),
         raw=imu_data,
     )
 
 
 def load_evslam_calibration(
-    camera_yaml_path: str | Path,
-    imu_yaml_path: str | Path | None = None,
+    camera_yaml_path,
+    imu_yaml_path=None,
 ) -> EvSlamCalibration:
     """
     Load camera and optional IMU calibration files for EvSLAM.
@@ -236,7 +258,7 @@ def _parse_camera_model(camera_key: str, camera_name: str, camera_data: dict) ->
     )
 
 
-def _parse_intrinsics(value: object, field_name: str) -> tuple[float, float, float, float]:
+def _parse_intrinsics(value: object, field_name: str) -> Tuple[float, float, float, float]:
     arr = np.asarray(value, dtype=np.float64).reshape(-1)
 
     if arr.shape != (4,):
@@ -263,7 +285,7 @@ def _parse_distortion(value: object, field_name: str) -> np.ndarray:
     return arr
 
 
-def _parse_resolution(value: object, field_name: str) -> tuple[int, int]:
+def _parse_resolution(value: object, field_name: str) -> Tuple[int, int]:
     arr = np.asarray(value, dtype=np.int64).reshape(-1)
 
     if arr.shape != (2,):
@@ -324,7 +346,7 @@ def _require_mapping(mapping: dict, key: str, context: str) -> dict:
     return value
 
 
-def _optional_string(mapping: dict, key: str) -> str | None:
+def _optional_string(mapping: dict, key: str) -> Optional[str]:
     value = mapping.get(key)
 
     if value is None:
@@ -336,7 +358,7 @@ def _optional_string(mapping: dict, key: str) -> str | None:
     return value
 
 
-def _optional_float_any(mapping: dict, keys: list[str]) -> float | None:
+def _optional_float_any(mapping: dict, keys: List[str]) -> Optional[float]:
     for key in keys:
         if key in mapping and mapping[key] is not None:
             return _parse_float(mapping[key], key)
@@ -344,7 +366,7 @@ def _optional_float_any(mapping: dict, keys: list[str]) -> float | None:
     return None
 
 
-def _optional_matrix4x4_any(mapping: dict, keys: list[str]) -> np.ndarray | None:
+def _optional_matrix4x4_any(mapping: dict, keys: List[str]) -> Optional[np.ndarray]:
     for key in keys:
         if key in mapping and mapping[key] is not None:
             return _parse_matrix4x4(mapping[key], key)
