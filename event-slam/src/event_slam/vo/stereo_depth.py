@@ -5,6 +5,9 @@ from dataclasses import dataclass
 import numpy as np
 import cv2
 
+from event_slam.core.geometry import as_float_array, as_points_xy, empty_points
+from event_slam.core.image import to_grayscale
+
 
 @dataclass
 class StereoDepthStats:
@@ -19,7 +22,6 @@ class StereoDepthStats:
     depth_min: float | None = None
     depth_max: float | None = None
     depth_median: float | None = None
-
     disparity_min: float | None = None
     disparity_max: float | None = None
     disparity_median: float | None = None
@@ -41,7 +43,6 @@ class StereoDepthResult:
     valid_mask: np.ndarray
     epipolar_error: np.ndarray
     disparity: np.ndarray
-
     stats: StereoDepthStats
 
 
@@ -66,15 +67,8 @@ class StereoDepthEstimator:
         lk_win_size: tuple = (21, 21),
         lk_max_level: int = 3,
     ) -> None:
-        
-        self.P1 = np.asarray(P1, dtype=np.float64)
-        self.P2 = np.asarray(P2, dtype=np.float64)
-
-        if self.P1.shape != (3, 4):
-            raise ValueError(f"P1 must have shape (3, 4), got {self.P1.shape}")
-
-        if self.P2.shape != (3, 4):
-            raise ValueError(f"P2 must have shape (3, 4), got {self.P2.shape}")
+        self.P1 = as_float_array(P1, (3, 4), "P1")
+        self.P2 = as_float_array(P2, (3, 4), "P2")
 
         self.epipolar_threshold = float(epipolar_threshold)
         self.min_disparity = float(min_disparity)
@@ -101,10 +95,10 @@ class StereoDepthEstimator:
         """
         Match left 2D points in the right rectified image and triangulate them.
         """
-        left_gray = self._to_gray(left_img)
-        right_gray = self._to_gray(right_img)
+        left_gray = to_grayscale(left_img)
+        right_gray = to_grayscale(right_img)
 
-        left_xy = _as_points_xy(left_points)
+        left_xy = as_points_xy(left_points)
         input_count = len(left_xy)
 
         if input_count == 0:
@@ -123,7 +117,7 @@ class StereoDepthEstimator:
         if right_lk is None or status is None:
             return self._empty_result(input_count=input_count)
 
-        right_xy = _as_points_xy(right_lk)
+        right_xy = as_points_xy(right_lk)
 
         match_mask = status.reshape(-1).astype(np.bool_)
         match_mask &= self._inside_image(left_xy, left_gray.shape)
@@ -222,15 +216,6 @@ class StereoDepthEstimator:
             & (points[:, 1] < height)
         )
 
-    def _to_gray(self, image: np.ndarray) -> np.ndarray:
-        if image.ndim == 2:
-            return image.astype(np.uint8, copy=False)
-
-        if image.ndim == 3 and image.shape[2] == 3:
-            return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-        raise ValueError(f"Unsupported image shape: {image.shape}")
-
     def _empty_result(
         self,
         input_count: int,
@@ -239,35 +224,18 @@ class StereoDepthEstimator:
     ) -> StereoDepthResult:
         if epipolar_error is None:
             epipolar_error = np.full(input_count, np.nan, dtype=np.float64)
-
         if disparity is None:
             disparity = np.full(input_count, np.nan, dtype=np.float64)
 
         return StereoDepthResult(
-            points_2d_left=_empty_points2(),
-            points_2d_right=_empty_points2(),
-            points_3d_left_camera=np.empty((0, 3), dtype=np.float64),
+            points_2d_left=empty_points(2),
+            points_2d_right=empty_points(2),
+            points_3d_left_camera=empty_points(3, dtype=np.float64),
             valid_mask=np.zeros(input_count, dtype=np.bool_),
             epipolar_error=epipolar_error,
             disparity=disparity,
             stats=StereoDepthStats(input_count=input_count),
         )
-
-
-def _as_points_xy(points: np.ndarray) -> np.ndarray:
-    if points is None:
-        return _empty_points2()
-
-    points = np.asarray(points, dtype=np.float32)
-
-    if points.size == 0:
-        return _empty_points2()
-
-    return points.reshape(-1, 2)
-
-
-def _empty_points2() -> np.ndarray:
-    return np.empty((0, 2), dtype=np.float32)
 
 
 def _make_stats(

@@ -3,7 +3,6 @@ from __future__ import annotations
 from bisect import bisect_left
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import numpy as np
 
@@ -30,9 +29,7 @@ class Trajectory:
     """
     A simple camera-pose trajectory.
 
-    During the VO stage, this stores consecutive T_W_Cleft poses.
-    Later, it can be extended with covariance, velocity, tracking status or
-    keyframe metadata.
+    Stores consecutive T_W_Cleft poses.
     """
 
     samples: list[PoseSample] = field(default_factory=list)

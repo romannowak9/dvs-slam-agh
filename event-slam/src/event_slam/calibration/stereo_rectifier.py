@@ -23,6 +23,9 @@ class StereoRectificationResult:
     P2: np.ndarray
     Q: np.ndarray
 
+    valid_roi_left: tuple
+    valid_roi_right: tuple
+
     K_left_rectified: np.ndarray
     K_right_rectified: np.ndarray
 
@@ -31,8 +34,6 @@ class StereoRectificationResult:
     right_map1: np.ndarray
     right_map2: np.ndarray
 
-    valid_roi_left: tuple
-    valid_roi_right: tuple
     baseline: float
 
 
@@ -148,7 +149,7 @@ class StereoRectifier:
 
         image_size = (self.width, self.height)
 
-        R1, R2, P1, P2, Q, roi1, roi2 = cv2.stereoRectify(
+        R1, R2, P1, P2, Q, valid_roi_left, valid_roi_right = cv2.stereoRectify(
             cameraMatrix1=K1,
             distCoeffs1=D1,
             cameraMatrix2=K2,
@@ -190,14 +191,14 @@ class StereoRectifier:
             P1=P1,
             P2=P2,
             Q=Q,
+            valid_roi_left=valid_roi_left,
+            valid_roi_right=valid_roi_right,
             K_left_rectified=K_left_rectified,
             K_right_rectified=K_right_rectified,
             left_map1=left_map1,
             left_map2=left_map2,
             right_map1=right_map1,
             right_map2=right_map2,
-            valid_roi_left=tuple(roi1),
-            valid_roi_right=tuple(roi2),
             baseline=baseline,
         )
 

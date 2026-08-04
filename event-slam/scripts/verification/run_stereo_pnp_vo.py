@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-from email import parser
 import sys
 from pathlib import Path
 
@@ -20,25 +19,26 @@ if SRC_PATH.exists():
 
 from event_slam.calibration.kalibr_parser import load_stereo_calibration
 from event_slam.calibration.stereo_rectifier import StereoRectifier
-from event_slam.core.types import StereoEventWindow
 from event_slam.datasets.evslam_reader import (
     DEFAULT_LEFT_EVENT_TOPIC,
     DEFAULT_RIGHT_EVENT_TOPIC,
     EvSlamRosbagReader,
 )
 from event_slam.events.event_aggregator import (
-    BACKGROUND_INTENSITY,
     EventFrameAggregator,
     EventFrameMode,
     PolarityMode,
 )
-from event_slam.events.event_filter import BackgroundActivityFilter
+from event_slam.events.event_filter import StereoBackgroundActivityFilter
 from event_slam.events.event_window import StereoEventWindowBuilder
+from event_slam.io.result_io import write_vo_csv
 from event_slam.vo.feature_tracker import FeatureDetectorMode
 from event_slam.vo.stereo_pnp_vo import StereoPnPVO
 
 from event_slam.debug.visualization import (
     colorize_event_frame,
+    draw_points,
+    draw_text_bar,
     format_value,
     save_image,
     show_image,
@@ -114,18 +114,10 @@ def main() -> None:
         pnp_iterations=args.pnp_iterations,
     )
 
-    left_baf = None
-    right_baf = None
+    background_filter = None
 
     if args.use_baf:
-        left_baf = BackgroundActivityFilter(
-            image_shape=image_shape,
-            time_window=args.baf_time_window,
-            radius=args.baf_radius,
-            min_neighbors=args.baf_min_neighbors,
-        )
-
-        right_baf = BackgroundActivityFilter(
+        background_filter = StereoBackgroundActivityFilter(
             image_shape=image_shape,
             time_window=args.baf_time_window,
             radius=args.baf_radius,
@@ -139,12 +131,7 @@ def main() -> None:
             break
 
         if args.use_baf:
-            window = StereoEventWindow(
-                t_start=window.t_start,
-                t_end=window.t_end,
-                left=left_baf.filter(window.left),
-                right=right_baf.filter(window.right),
-            )
+            window = background_filter.filter(window)
 
         stereo_frame = aggregator.aggregate_stereo_window(window)
 
@@ -187,9 +174,9 @@ def main() -> None:
 
     csv_path = args.output_dir / "trajectory.csv"
 
-    vo.save_csv(csv_path)
+    write_vo_csv(vo.results, csv_path)
 
-    print_summary(processed, vo.results)
+    print_summary(vo.get_summary())
     print()
     print(f"trajectory_csv: {csv_path}")
 
@@ -299,53 +286,34 @@ def print_frame_result(frame_index: int, result) -> None:
     )
 
 
-def print_summary(processed: int, results: list) -> None:
-    success_count = sum(1 for result in results if result.success)
-    failed_count = sum(1 for result in results if result.initialized and not result.success)
-
-    inliers = [
-        result.pnp_inlier_count
-        for result in results
-        if result.pnp_inlier_count > 0
-    ]
-
-    if len(results) > 0:
-        final_position = results[-1].T_W_Cleft[:3, 3]
-    else:
-        final_position = np.zeros(3, dtype=np.float64)
-
-    inlier_median = float(np.median(inliers)) if len(inliers) > 0 else np.nan
-
+def print_summary(summary) -> None:
     print()
     print("VO summary")
     print("=" * 80)
-    print(f"processed_frames: {processed}")
-    print(f"successful_steps: {success_count}")
-    print(f"failed_frames: {failed_count}")
-    print(f"median_inliers: {format_value(inlier_median)}")
+    print(f"processed_frames: {summary.processed_frames}")
+    print(f"successful_steps: {summary.successful_steps}")
+    print(f"failed_frames: {summary.failed_frames}")
+    print(f"median_inliers: {format_value(summary.median_inliers)}")
     print(
         "final_position: "
-        f"[{final_position[0]:.6f}, {final_position[1]:.6f}, {final_position[2]:.6f}]"
+        f"[{summary.final_position[0]:.6f}, "
+        f"{summary.final_position[1]:.6f}, "
+        f"{summary.final_position[2]:.6f}]"
     )
 
 
 def make_debug_image(left_gray: np.ndarray, result) -> np.ndarray:
     image = colorize_event_frame(left_gray)
-
-    for point in result.tracked_points_curr:
-        x, y = int(round(point[0])), int(round(point[1]))
-        cv2.circle(image, (x, y), 2, (80, 80, 80), -1, cv2.LINE_AA)
-
-    for point in result.pnp_points_curr:
-        x, y = int(round(point[0])), int(round(point[1]))
-        cv2.circle(image, (x, y), 2, (0, 255, 255), -1, cv2.LINE_AA)
-
-    for point in result.pnp_inlier_points_curr:
-        x, y = int(round(point[0])), int(round(point[1]))
-        cv2.circle(image, (x, y), 3, (0, 255, 0), 1, cv2.LINE_AA)
-
+    draw_points(image, result.tracked_points_curr, color=(80, 80, 80))
+    draw_points(image, result.pnp_points_curr, color=(0, 255, 255))
+    draw_points(
+        image,
+        result.pnp_inlier_points_curr,
+        color=(0, 255, 0),
+        radius=3,
+        thickness=1,
+    )
     draw_status_bar(image, result)
-
     return image
 
 
@@ -357,18 +325,7 @@ def draw_status_bar(image: np.ndarray, result) -> None:
         f"inliers={result.pnp_inlier_count} "
         f"err={format_value(result.reprojection_error_median)}"
     )
-
-    cv2.rectangle(image, (0, 0), (image.shape[1], 28), (0, 0, 0), -1)
-    cv2.putText(
-        image,
-        text,
-        (8, 19),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.55,
-        (255, 255, 255),
-        1,
-        cv2.LINE_AA,
-    )
+    draw_text_bar(image, text)
 
 
 if __name__ == "__main__":

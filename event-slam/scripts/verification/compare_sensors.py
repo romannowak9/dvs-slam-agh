@@ -24,7 +24,6 @@ from event_slam.datasets.evslam_reader import (
     EvSlamRosbagReader,
 )
 from event_slam.events.event_aggregator import (
-    BACKGROUND_INTENSITY,
     EventFrameAggregator,
     EventFrameMode,
     PolarityMode,
@@ -273,7 +272,29 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-class LeftEventFrameStream:
+class _NearestTimestampStream:
+    def __init__(self) -> None:
+        self.previous = None
+        self.next_item = None
+        self.exhausted = False
+
+    def get_nearest(self, timestamp: float):
+        while self.next_item is not None and self.next_item[0] <= timestamp:
+            self.previous = self.next_item
+            self._advance()
+
+        candidates = [
+            item for item in (self.previous, self.next_item) if item is not None
+        ]
+
+        if not candidates:
+            return None, None
+
+        nearest = min(candidates, key=lambda item: abs(item[0] - timestamp))
+        return nearest[1], nearest[0]
+
+
+class LeftEventFrameStream(_NearestTimestampStream):
     """
     Streaming nearest-neighbor access to generated left event frames.
 
@@ -290,30 +311,8 @@ class LeftEventFrameStream:
         self.aggregator = aggregator
         self.baf_filter = baf_filter
 
-        self.previous = None
-        self.next_item = None
-        self.exhausted = False
-
+        super().__init__()
         self._advance()
-
-    def get_nearest(self, timestamp: float):
-        while self.next_item is not None and self.next_item[0] <= timestamp:
-            self.previous = self.next_item
-            self._advance()
-
-        candidates = []
-
-        if self.previous is not None:
-            candidates.append(self.previous)
-
-        if self.next_item is not None:
-            candidates.append(self.next_item)
-
-        if not candidates:
-            return None, None
-
-        nearest = min(candidates, key=lambda item: abs(item[0] - timestamp))
-        return nearest[1], nearest[0]
 
     def _advance(self) -> None:
         if self.exhausted:
@@ -349,7 +348,7 @@ class LeftEventFrameStream:
         self.next_item = (timestamp, image)
 
 
-class CompressedImageStream:
+class CompressedImageStream(_NearestTimestampStream):
     """
     Streaming image reader with nearest-neighbor timestamp matching.
     """
@@ -364,10 +363,7 @@ class CompressedImageStream:
         self.iterator = reader.iter_messages(topics=topic, start_time=start_time)
         self.image_kind = image_kind
 
-        self.previous = None
-        self.next_item = None
-        self.exhausted = False
-
+        super().__init__()
         self._advance()
 
     def get_next(self):
@@ -379,25 +375,6 @@ class CompressedImageStream:
         self._advance()
 
         return item
-
-    def get_nearest(self, timestamp: float):
-        while self.next_item is not None and self.next_item[0] <= timestamp:
-            self.previous = self.next_item
-            self._advance()
-
-        candidates = []
-
-        if self.previous is not None:
-            candidates.append(self.previous)
-
-        if self.next_item is not None:
-            candidates.append(self.next_item)
-
-        if not candidates:
-            return None, None
-
-        nearest = min(candidates, key=lambda item: abs(item[0] - timestamp))
-        return nearest[1], nearest[0]
 
     def _advance(self) -> None:
         if self.exhausted:

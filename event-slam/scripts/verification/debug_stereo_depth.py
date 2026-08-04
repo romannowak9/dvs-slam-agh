@@ -19,26 +19,27 @@ if SRC_PATH.exists():
 
 from event_slam.calibration.kalibr_parser import load_stereo_calibration
 from event_slam.calibration.stereo_rectifier import StereoRectifier
-from event_slam.core.types import StereoEventWindow
 from event_slam.datasets.evslam_reader import (
     DEFAULT_LEFT_EVENT_TOPIC,
     DEFAULT_RIGHT_EVENT_TOPIC,
     EvSlamRosbagReader,
 )
 from event_slam.events.event_aggregator import (
-    BACKGROUND_INTENSITY,
     EventFrameAggregator,
     EventFrameMode,
     PolarityMode,
 )
-from event_slam.events.event_filter import BackgroundActivityFilter
+from event_slam.events.event_filter import StereoBackgroundActivityFilter
 from event_slam.events.event_window import StereoEventWindowBuilder
 from event_slam.vo.feature_tracker import FeatureDetectorMode, FeatureTracker
 from event_slam.vo.stereo_depth import StereoDepthEstimator
 
 from event_slam.debug.visualization import (
     colorize_event_frame,
+    draw_stereo_matches,
+    draw_text_bar,
     format_value,
+    make_side_by_side,
     save_image,
     show_image,
 )
@@ -101,18 +102,10 @@ def main() -> None:
         max_depth=args.max_depth,
     )
 
-    left_baf = None
-    right_baf = None
+    background_filter = None
 
     if args.use_baf:
-        left_baf = BackgroundActivityFilter(
-            image_shape=image_shape,
-            time_window=args.baf_time_window,
-            radius=args.baf_radius,
-            min_neighbors=args.baf_min_neighbors,
-        )
-
-        right_baf = BackgroundActivityFilter(
+        background_filter = StereoBackgroundActivityFilter(
             image_shape=image_shape,
             time_window=args.baf_time_window,
             radius=args.baf_radius,
@@ -126,12 +119,7 @@ def main() -> None:
             break
 
         if args.use_baf:
-            window = StereoEventWindow(
-                t_start=window.t_start,
-                t_end=window.t_end,
-                left=left_baf.filter(window.left),
-                right=right_baf.filter(window.right),
-            )
+            window = background_filter.filter(window)
 
         stereo_frame = aggregator.aggregate_stereo_window(window)
 
@@ -262,59 +250,29 @@ def make_debug_image(
 ) -> np.ndarray:
     left_color = colorize_event_frame(left_gray)
     right_color = colorize_event_frame(right_gray)
+    debug = make_side_by_side(left_color, right_color)
 
-    debug = np.concatenate((left_color, right_color), axis=1)
-    width = left_color.shape[1]
-
-    count = min(len(depth_result.points_2d_left), int(max_draw_matches))
-
-    if count == 0:
-        return debug
-
-    depths = depth_result.points_3d_left_camera[:count, 2]
-    depth_min = float(np.min(depths))
-    depth_max = float(np.max(depths))
-    denom = max(1e-9, depth_max - depth_min)
-
-    for index in range(count):
-        left_pt = depth_result.points_2d_left[index]
-        right_pt = depth_result.points_2d_right[index]
-        depth = depth_result.points_3d_left_camera[index, 2]
-
-        intensity = int(round(255.0 * (depth - depth_min) / denom))
-        color = (0, 255 - intensity, 255)
-
-        x0, y0 = int(round(left_pt[0])), int(round(left_pt[1]))
-        x1, y1 = int(round(right_pt[0])) + width, int(round(right_pt[1]))
-
-        cv2.circle(debug, (x0, y0), 2, color, -1, cv2.LINE_AA)
-        cv2.circle(debug, (x1, y1), 2, color, -1, cv2.LINE_AA)
-        cv2.line(debug, (x0, y0), (x1, y1), color, 1, cv2.LINE_AA)
+    draw_stereo_matches(
+        image=debug,
+        points_left=depth_result.points_2d_left,
+        points_right=depth_result.points_2d_right,
+        left_width=left_color.shape[1],
+        points_3d=depth_result.points_3d_left_camera,
+        max_matches=max_draw_matches,
+    )
 
     return debug
 
 
 def draw_stats(image: np.ndarray, depth_result) -> None:
     stats = depth_result.stats
-
     text = (
         f"in={stats.input_count} "
         f"matched={stats.matched_count} "
         f"3d={stats.triangulated_count} "
         f"z_med={format_value(stats.depth_median)}"
     )
-
-    cv2.rectangle(image, (0, 0), (image.shape[1], 28), (0, 0, 0), -1)
-    cv2.putText(
-        image,
-        text,
-        (8, 19),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.55,
-        (255, 255, 255),
-        1,
-        cv2.LINE_AA,
-    )
+    draw_text_bar(image, text)
 
 
 def print_frame_stats(frame_index: int, window, tracking_result, depth_result) -> None:

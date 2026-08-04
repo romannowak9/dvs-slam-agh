@@ -6,7 +6,6 @@ import argparse
 import sys
 from pathlib import Path
 
-import numpy as np
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -17,6 +16,7 @@ if SRC_PATH.exists():
 
 
 from event_slam.core.types import CameraId
+from event_slam.debug.visualization import print_section, print_vector
 from event_slam.datasets.evslam_reader import (
     DEFAULT_LEFT_EVENT_TOPIC,
     DEFAULT_LEFT_IMU_TOPIC,
@@ -290,17 +290,6 @@ def update_time_range(stats: dict, timestamp: float) -> None:
 
     if stats["t_max"] is None or timestamp > stats["t_max"]:
         stats["t_max"] = timestamp
-
-
-def print_section(title: str) -> None:
-    print()
-    print("=" * 80)
-    print(title)
-    print("=" * 80)
-
-
-def print_vector(name: str, vector: np.ndarray) -> None:
-    print(f"{name}: {np.array2string(vector, precision=9, suppress_small=False)}")
 
 
 if __name__ == "__main__":

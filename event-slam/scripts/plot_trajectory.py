@@ -24,6 +24,7 @@ if SRC_PATH.exists():
 
 
 from event_slam.core.trajectory import Trajectory
+from event_slam.io.result_io import load_evslam_result_array
 
 
 @dataclass
@@ -265,45 +266,6 @@ def load_trajectory_plot_data(path: Path, label: str) -> TrajectoryPlotData:
         trajectory=trajectory,
         velocities_camera=velocities_camera,
     )
-
-
-def load_evslam_result_array(path: Path) -> np.ndarray:
-    """
-    Load an EvSLAM result file.
-
-    Expected columns:
-        timestamp tx ty tz qx qy qz qw vx vy vz
-    """
-    path = Path(path)
-    rows = []
-
-    with open(path, "r", encoding="utf-8") as file:
-        for line_number, line in enumerate(file, start=1):
-            line = line.strip()
-
-            if not line or line.startswith("#"):
-                continue
-
-            parts = line.replace(",", " ").split()
-
-            if len(parts) != 11:
-                raise ValueError(
-                    f"Expected 11 columns in {path} at line {line_number}, "
-                    f"got {len(parts)}: {line}"
-                )
-
-            try:
-                rows.append([float(value) for value in parts])
-            except ValueError as exc:
-                raise ValueError(
-                    f"Could not parse numeric values in {path} "
-                    f"at line {line_number}: {line}"
-                ) from exc
-
-    if len(rows) == 0:
-        raise ValueError(f"No trajectory samples found in file: {path}")
-
-    return np.asarray(rows, dtype=np.float64)
 
 
 def get_gt_values(

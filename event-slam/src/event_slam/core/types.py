@@ -69,34 +69,6 @@ class EventBatch:
 
         return float(self.t[0]), float(self.t[-1])
 
-    @property
-    def xy(self) -> np.ndarray:
-        if self.is_empty:
-            return np.empty((0, 2), dtype=np.float32)
-
-        return np.column_stack((self.x, self.y)).astype(np.float32)
-
-    @property
-    def polarity_signed(self) -> np.ndarray:
-        """
-        Return event polarity encoded as -1 / +1.
-        """
-        return np.where(self.p, 1, -1).astype(np.int8)
-
-    def slice_time(self, t_start: float, t_end: float) -> EventBatch:
-        """
-        Return events from the half-open interval [t_start, t_end).
-        """
-        mask = (self.t >= t_start) & (self.t < t_end)
-
-        return EventBatch(
-            t=self.t[mask],
-            x=self.x[mask],
-            y=self.y[mask],
-            p=self.p[mask],
-            camera=self.camera,
-        )
-
     @classmethod
     def empty(cls, camera: CameraId) -> EventBatch:
         return cls(
@@ -139,10 +111,6 @@ class StereoEventWindow:
     @property
     def duration(self) -> float:
         return self.t_end - self.t_start
-
-    @property
-    def event_count(self) -> int:
-        return len(self.left) + len(self.right)
 
     @property
     def is_empty(self) -> bool:
