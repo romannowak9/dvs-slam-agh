@@ -15,13 +15,8 @@ imu:
     reference_time: middle
     time_bins: 32
 
-  rotation_prior:
-    enabled: true
-    max_error_deg: 3.0
-    reject_bad_pnp: true
-
 processing:
-  time_window: 0.012
+  time_window: 0.006
   t_start: null
   t_end: null
   num_frames: 0
@@ -29,13 +24,13 @@ processing:
 aggregation:
   mode: exponential
   polarity_mode: both
-  tau: 0.012
+  tau: 0.01
 
 baf:
   enabled: true
   time_window: 0.01
   radius: 2
-  min_neighbors: 7
+  min_neighbors: 6
 
 rectification:
   alpha: 0.0
@@ -78,6 +73,6 @@ velocity:
   smoothing_poly_order: 2
 
 output:
-  output_dir: outputs/evslam_vo_seq007_imu
+  output_dir: outputs/evslam_vo_seq007
   trajectory_csv: trajectory.csv
   result_txt: result_seq007.txt
