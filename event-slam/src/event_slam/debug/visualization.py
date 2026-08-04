@@ -5,6 +5,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from event_slam.core.geometry import as_points_xy
 from event_slam.events.event_aggregator import BACKGROUND_INTENSITY
 
 
@@ -50,8 +51,6 @@ def colorize_event_frame(gray: np.ndarray) -> np.ndarray:
 def make_side_by_side(left: np.ndarray, right: np.ndarray) -> np.ndarray:
     """
     Concatenate two images horizontally.
-
-    Images must have the same height and number of channels.
     """
     if left.shape[0] != right.shape[0]:
         raise ValueError(
@@ -71,7 +70,6 @@ def draw_text_bar(
     Draw a black status bar with white text at the top of an image.
     """
     cv2.rectangle(image, (0, 0), (image.shape[1], height), (0, 0, 0), -1)
-
     cv2.putText(
         image,
         text,
@@ -94,9 +92,7 @@ def draw_points(
     """
     Draw 2D points on an image.
     """
-    points = _as_points2(points)
-
-    for point in points:
+    for point in as_points_xy(points):
         x, y = int(round(point[0])), int(round(point[1]))
         cv2.circle(image, (x, y), radius, color, thickness, cv2.LINE_AA)
 
@@ -112,8 +108,8 @@ def draw_tracks(
     """
     Draw 2D tracks as lines from previous to current point positions.
     """
-    prev_points = _as_points2(prev_points)
-    curr_points = _as_points2(curr_points)
+    prev_points = as_points_xy(prev_points)
+    curr_points = as_points_xy(curr_points)
 
     count = min(len(prev_points), len(curr_points))
 
@@ -138,13 +134,9 @@ def draw_stereo_matches(
 ) -> None:
     """
     Draw stereo matches on a side-by-side left/right image.
-
-    If points_3d is provided, match color is based on relative depth.
-    Otherwise all matches are drawn in yellow.
     """
-    points_left = _as_points2(points_left)
-    points_right = _as_points2(points_right)
-
+    points_left = as_points_xy(points_left)
+    points_right = as_points_xy(points_right)
     count = min(len(points_left), len(points_right))
 
     if max_matches is not None:
@@ -158,11 +150,9 @@ def draw_stereo_matches(
     for index in range(count):
         left_pt = points_left[index]
         right_pt = points_right[index]
-
         x0, y0 = int(round(left_pt[0])), int(round(left_pt[1]))
         x1 = int(round(right_pt[0])) + int(left_width)
         y1 = int(round(right_pt[1]))
-
         color = colors[index]
 
         cv2.circle(image, (x0, y0), 2, color, -1, cv2.LINE_AA)
@@ -215,16 +205,50 @@ def format_value(value, precision: int = 3) -> str:
     return f"{value_float:.{precision}f}"
 
 
-def _as_points2(points: np.ndarray) -> np.ndarray:
-    if points is None:
-        return np.empty((0, 2), dtype=np.float32)
+def print_vo_frame(frame_index, window, result, motion_compensation=None) -> None:
+    """Print the diagnostics produced for one stereo VO frame."""
+    t = result.T_W_Cleft[:3, 3]
+    motion_text = ""
 
-    points = np.asarray(points, dtype=np.float32)
+    if motion_compensation is not None:
+        left_stats = motion_compensation.left_stats
+        right_stats = motion_compensation.right_stats
+        motion_text = (
+            f"mc_left={left_stats.output_count}/{left_stats.input_count}, "
+            f"mc_right={right_stats.output_count}/{right_stats.input_count}, "
+        )
 
-    if points.size == 0:
-        return np.empty((0, 2), dtype=np.float32)
+    print(
+        f"frame {frame_index:05d}: "
+        f"timestamp={result.timestamp:.9f}, "
+        f"events_left={len(window.left)}, "
+        f"events_right={len(window.right)}, "
+        f"{motion_text}"
+        f"success={result.success}, "
+        f"tracks={result.track_count}, "
+        f"pnp={result.pnp_point_count}, "
+        f"inliers={result.pnp_inlier_count}, "
+        f"err_med={format_value(result.reprojection_error_median)}, "
+        f"pnp_rot={format_value(result.pnp_rotation_step_deg)}, "
+        f"imu_rot={format_value(result.imu_rotation_step_deg)}, "
+        f"pnp_imu_err={format_value(result.pnp_imu_rotation_error_deg)}, "
+        f"imu_ok={result.imu_rotation_consistent}, "
+        f"imu_rejected={result.imu_rejected}, "
+        f"depth={result.depth_count}, "
+        f"pos=[{t[0]:.3f}, {t[1]:.3f}, {t[2]:.3f}], "
+        f"msg={result.message}"
+    )
 
-    return points.reshape(-1, 2)
+
+def print_section(title: str) -> None:
+    print()
+    print("=" * 80)
+    print(title)
+    print("=" * 80)
+
+
+def print_vector(name: str, vector: np.ndarray) -> None:
+    print(f"{name}: {np.array2string(vector, precision=9, suppress_small=False)}")
 
 
 def _make_match_colors(count: int, points_3d: np.ndarray | None) -> list:
@@ -244,7 +268,6 @@ def _make_match_colors(count: int, points_3d: np.ndarray | None) -> list:
     depth_min = float(np.nanmin(depths))
     depth_max = float(np.nanmax(depths))
     denom = max(1e-9, depth_max - depth_min)
-
     colors = []
 
     for depth in depths:
@@ -254,7 +277,6 @@ def _make_match_colors(count: int, points_3d: np.ndarray | None) -> list:
 
         intensity = int(round(255.0 * (float(depth) - depth_min) / denom))
         intensity = int(np.clip(intensity, 0, 255))
-
         colors.append((0, 255 - intensity, 255))
 
     return colors

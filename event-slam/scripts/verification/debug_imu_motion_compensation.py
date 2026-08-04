@@ -20,8 +20,7 @@ from event_slam.calibration.kalibr_parser import (
     load_imu_calibration,
     load_stereo_calibration,
 )
-from event_slam.core.imu import load_imu_gyro_from_evslam_reader
-from event_slam.core.types import StereoEventWindow
+from event_slam.core.imu import ImuCoverageError
 from event_slam.datasets.evslam_reader import (
     DEFAULT_LEFT_EVENT_TOPIC,
     DEFAULT_RIGHT_EVENT_TOPIC,
@@ -37,7 +36,7 @@ from event_slam.events.event_aggregator import (
     EventFrameMode,
     PolarityMode,
 )
-from event_slam.events.event_filter import BackgroundActivityFilter
+from event_slam.events.event_filter import StereoBackgroundActivityFilter
 from event_slam.events.event_window import StereoEventWindowBuilder
 from event_slam.events.imu_motion_compensation import (
     compensate_stereo_window_rotation,
@@ -66,10 +65,7 @@ def main() -> None:
         right_event_topic=args.right_topic,
     )
 
-    imu_timestamps, angular_velocities = load_imu_gyro_from_evslam_reader(
-        reader=reader,
-        imu_topic=imu_topic,
-    )
+    imu_timestamps, angular_velocities = reader.load_imu_gyro(topic=imu_topic)
 
     builder = StereoEventWindowBuilder.from_reader(
         reader=reader,
@@ -86,18 +82,10 @@ def main() -> None:
         tau=args.tau,
     )
 
-    left_baf = None
-    right_baf = None
+    background_filter = None
 
     if args.use_baf:
-        left_baf = BackgroundActivityFilter(
-            image_shape=image_shape,
-            time_window=args.baf_time_window,
-            radius=args.baf_radius,
-            min_neighbors=args.baf_min_neighbors,
-        )
-
-        right_baf = BackgroundActivityFilter(
+        background_filter = StereoBackgroundActivityFilter(
             image_shape=image_shape,
             time_window=args.baf_time_window,
             radius=args.baf_radius,
@@ -114,15 +102,7 @@ def main() -> None:
         raw_right_count = len(window.right)
 
         if args.use_baf:
-            left_batch = left_baf.filter(window.left)
-            right_batch = right_baf.filter(window.right)
-
-            window = StereoEventWindow(
-                t_start=window.t_start,
-                t_end=window.t_end,
-                left=left_batch,
-                right=right_batch,
-            )
+            window = background_filter.filter(window)
 
         try:
             compensation_result = compensate_stereo_window_rotation(
@@ -139,10 +119,9 @@ def main() -> None:
                 + args.extra_timeshift,
                 imu_time_offset=imu_calibration.time_offset or 0.0,
                 reference_time=args.reference_time,
-                gyro_bias=args.gyro_bias,
                 num_time_bins=args.time_bins,
             )
-        except ValueError as exc:
+        except ImuCoverageError as exc:
             print(f"frame {frame_index:05d}: skipped, {exc}")
             continue
 
@@ -254,13 +233,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--time-bins", default=32, type=int)
     parser.add_argument("--extra-timeshift", default=0.0, type=float)
-    parser.add_argument(
-        "--gyro-bias",
-        default=None,
-        type=parse_vector3,
-        help="Optional gyro bias as 'bx,by,bz' in rad/s.",
-    )
-
     parser.add_argument("--use-baf", action="store_true")
     parser.add_argument("--baf-time-window", default=1.0 / 24.0, type=float)
     parser.add_argument("--baf-radius", default=2, type=int)
@@ -409,18 +381,6 @@ def print_frame_report(
         f"right_dropped={right_stats.dropped_count}, "
         f"reference_time={left_stats.reference_time:.9f}"
     )
-
-
-def parse_vector3(text: str) -> np.ndarray:
-    parts = text.split(",")
-
-    if len(parts) != 3:
-        raise argparse.ArgumentTypeError("Expected vector format: bx,by,bz")
-
-    try:
-        return np.asarray([float(value) for value in parts], dtype=np.float64)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("Expected three float values") from exc
 
 
 if __name__ == "__main__":

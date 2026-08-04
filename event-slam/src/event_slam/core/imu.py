@@ -8,7 +8,9 @@ from event_slam.core.geometry import (
     rotvec_to_rotmat,
 )
 
-from event_slam.datasets.evslam_reader import EvSlamRosbagReader
+
+class ImuCoverageError(RuntimeError):
+    """Requested camera interval is not covered by the available IMU data."""
 
 
 def camera_time_to_imu_time(
@@ -77,7 +79,7 @@ def integrate_gyro_rotation(
         return np.eye(3, dtype=np.float64)
 
     if start_time < timestamps[0] or end_time > timestamps[-1]:
-        raise ValueError(
+        raise ImuCoverageError(
             "Requested IMU integration interval is outside available IMU range: "
             f"[{start_time:.9f}, {end_time:.9f}] not within "
             f"[{timestamps[0]:.9f}, {timestamps[-1]:.9f}]"
@@ -252,18 +254,6 @@ def rotation_error_deg(R_estimated: np.ndarray, R_reference: np.ndarray) -> floa
     return rotation_angle_deg(R_estimated @ R_reference.T)
 
 
-def extract_imu_sample(sample) -> tuple:
-    """
-    Extract timestamp and angular velocity from an IMU sample object.
-    """
-    timestamp = _read_timestamp(sample)
-    angular_velocity = _read_vector3_field(
-        sample=sample,
-        field_names=("angular_velocity", "gyro", "gyroscope"),
-    )
-
-    return timestamp, angular_velocity
-
 def prepare_imu_gyro_samples(
     timestamps: np.ndarray,
     angular_velocities: np.ndarray,
@@ -288,30 +278,6 @@ def prepare_imu_gyro_samples(
     keep[1:] = np.diff(timestamps) > 0.0
 
     return timestamps[keep], angular_velocities[keep]
-
-
-def load_imu_gyro_from_evslam_reader(
-    reader: EvSlamRosbagReader,
-    imu_topic: str,
-) -> tuple:
-    timestamps = []
-    angular_velocities = []
-
-    for sample in reader.iter_imu_samples(topic=imu_topic):
-        timestamp, angular_velocity = extract_imu_sample(sample)
-        timestamps.append(timestamp)
-        angular_velocities.append(angular_velocity)
-
-    if len(timestamps) < 2:
-        raise ValueError(
-            f"Need at least two IMU samples on topic {imu_topic}, "
-            f"got {len(timestamps)}"
-        )
-
-    return prepare_imu_gyro_samples(
-        timestamps=np.asarray(timestamps, dtype=np.float64),
-        angular_velocities=np.asarray(angular_velocities, dtype=np.float64),
-    )
 
 
 def _integration_times(
@@ -345,28 +311,3 @@ def _interpolate_vectors(
         )
 
     return output
-
-
-def _read_timestamp(sample) -> float:
-    for field_name in ("timestamp", "t", "time"):
-        if hasattr(sample, field_name):
-            return float(getattr(sample, field_name))
-
-    raise ValueError(f"Could not read timestamp from IMU sample: {sample}")
-
-
-def _read_vector3_field(sample, field_names) -> np.ndarray:
-    for field_name in field_names:
-        if hasattr(sample, field_name):
-            value = getattr(sample, field_name)
-
-            if all(hasattr(value, attr) for attr in ("x", "y", "z")):
-                vector = np.array([value.x, value.y, value.z], dtype=np.float64)
-            else:
-                vector = np.asarray(value, dtype=np.float64).reshape(-1)
-
-            return as_float_array(vector, (3,), field_name)
-
-    raise ValueError(
-        f"Could not find any of {field_names} in IMU sample: {sample}"
-    )

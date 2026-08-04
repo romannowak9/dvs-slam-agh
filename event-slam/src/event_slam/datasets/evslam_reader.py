@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
+from event_slam.core.imu import prepare_imu_gyro_samples
 from event_slam.core.types import CameraId, EventBatch
 
 import rosbag
@@ -31,10 +32,6 @@ class ImuSample:
     orientation_xyzw: np.ndarray
     angular_velocity: np.ndarray
     linear_acceleration: np.ndarray
-
-    orientation_covariance: np.ndarray | None = None
-    angular_velocity_covariance: np.ndarray | None = None
-    linear_acceleration_covariance: np.ndarray | None = None
 
 
 class EvSlamRosbagReader:
@@ -179,8 +176,8 @@ class EvSlamRosbagReader:
         """
         Iterate over IMU measurements.
 
-        IMU is not used by the stage-1 stereo VO yet, but exposing this stream
-        now makes later rotation compensation and VIO extensions easier.
+        The stream is used for gyro integration and rotational event
+        motion compensation.
         """
         imu_topic = self.imu_topic if topic is None else topic
 
@@ -196,6 +193,29 @@ class EvSlamRosbagReader:
 
             if max_samples is not None and yielded_samples >= max_samples:
                 break
+
+    def load_imu_gyro(self, topic: str | None = None) -> tuple:
+        """
+        Load, sort and deduplicate gyroscope samples from one IMU topic.
+        """
+        imu_topic = self.imu_topic if topic is None else topic
+        timestamps = []
+        angular_velocities = []
+
+        for sample in self.iter_imu_samples(topic=imu_topic):
+            timestamps.append(sample.timestamp)
+            angular_velocities.append(sample.angular_velocity)
+
+        if len(timestamps) < 2:
+            raise ValueError(
+                f"Need at least two IMU samples on topic {imu_topic}, "
+                f"got {len(timestamps)}"
+            )
+
+        return prepare_imu_gyro_samples(
+            timestamps=np.asarray(timestamps, dtype=np.float64),
+            angular_velocities=np.asarray(angular_velocities, dtype=np.float64),
+        )
 
     def get_time_range(self) -> tuple[float, float]:
         """
@@ -310,14 +330,6 @@ def _imu_msg_to_sample(msg, topic: str) -> ImuSample:
         dtype=np.float64,
     )
 
-    orientation_covariance = _covariance_to_array(msg.orientation_covariance)
-    angular_velocity_covariance = _covariance_to_array(
-        msg.angular_velocity_covariance
-    )
-    linear_acceleration_covariance = _covariance_to_array(
-        msg.linear_acceleration_covariance
-    )
-
     return ImuSample(
         timestamp=timestamp,
         topic=topic,
@@ -325,22 +337,7 @@ def _imu_msg_to_sample(msg, topic: str) -> ImuSample:
         orientation_xyzw=orientation_xyzw,
         angular_velocity=angular_velocity,
         linear_acceleration=linear_acceleration,
-        orientation_covariance=orientation_covariance,
-        angular_velocity_covariance=angular_velocity_covariance,
-        linear_acceleration_covariance=linear_acceleration_covariance,
     )
-
-
-def _covariance_to_array(covariance) -> np.ndarray | None:
-    if covariance is None:
-        return None
-
-    arr = np.asarray(covariance, dtype=np.float64).reshape(-1)
-
-    if arr.size == 0:
-        return None
-
-    return arr
 
 
 def _ros_time_to_seconds(ros_time) -> float:

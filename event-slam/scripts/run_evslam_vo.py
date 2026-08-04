@@ -16,8 +16,8 @@ if SRC_PATH.exists():
     sys.path.insert(0, str(SRC_PATH))
 
 
-from event_slam.io.result_writer import write_result_from_reference_file
-from event_slam.vo.pipeline import EvSlamStereoVOPipeline
+from event_slam.io.result_io import save_outputs
+from event_slam.vo.setup import create_pipeline
 
 
 def main() -> None:
@@ -28,7 +28,7 @@ def main() -> None:
     interrupted = False
 
     try:
-        pipeline = EvSlamStereoVOPipeline(config)
+        pipeline = create_pipeline(config)
         pipeline.run()
 
     except KeyboardInterrupt:
@@ -38,35 +38,7 @@ def main() -> None:
 
     finally:
         if pipeline is not None:
-            csv_path, velocity_path, result_path, result_stats = save_outputs(
-                pipeline=pipeline,
-                config=config,
-            )
-
-            pipeline.print_summary()
-
-            print()
-            print("Saved outputs")
-            print("=" * 80)
-            print(f"trajectory_csv: {csv_path}")
-
-            if velocity_path is not None:
-                print(f"velocity_csv: {velocity_path}")
-
-            if result_path is not None:
-                print(f"result_txt: {result_path}")
-
-                if result_stats is not None:
-                    print(
-                        "result_stats: "
-                        f"reference={result_stats.reference_count}, "
-                        f"written={result_stats.written_count}, "
-                        f"skipped={result_stats.skipped_count}"
-                    )
-
-            if interrupted:
-                print()
-                print("Partial outputs saved after KeyboardInterrupt.")
+            save_outputs(pipeline, config, interrupted)
 
 
 def parse_args() -> argparse.Namespace:
@@ -97,47 +69,6 @@ def load_config(path: Path) -> dict:
         raise ValueError(f"Config must be a YAML dictionary: {path}")
 
     return config
-
-
-def save_outputs(
-    pipeline: EvSlamStereoVOPipeline,
-    config: dict,
-) -> tuple:
-    csv_path = pipeline.save_trajectory_output()
-    velocity_path = pipeline.save_velocity_output()
-    result_path, result_stats = save_challenge_result(
-        pipeline=pipeline,
-        config=config,
-    )
-
-    return csv_path, velocity_path, result_path, result_stats
-
-
-def save_challenge_result(
-    pipeline: EvSlamStereoVOPipeline,
-    config: dict,
-) -> tuple:
-    dataset_cfg = config.get("dataset", {})
-    reference_path = dataset_cfg.get("reference_timestamps_path")
-
-    if not reference_path:
-        return None, None
-
-    if len(pipeline.trajectory) == 0:
-        print("Skipping challenge result: trajectory is empty.")
-        return None, None
-
-    result_path = pipeline.get_output_path("result_txt", "result.txt")
-
-    result_stats = write_result_from_reference_file(
-        trajectory=pipeline.trajectory,
-        velocity=pipeline.velocity_trajectory,
-        reference_path=reference_path,
-        output_path=result_path,
-        skip_out_of_range=True,
-    )
-
-    return result_path, result_stats
 
 
 if __name__ == "__main__":

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import numpy as np
 
@@ -120,52 +119,6 @@ class VelocityTrajectory:
                 self.speeds.reshape(-1, 1),
             )
         ).astype(np.float64)
-
-    def as_world_array(self) -> np.ndarray:
-        """
-        Return velocity in world frame:
-
-            timestamp vx vy vz speed
-        """
-        if self.is_empty:
-            return np.empty((0, 5), dtype=np.float64)
-
-        speed = np.linalg.norm(self.velocities_world, axis=1)
-
-        return np.hstack(
-            (
-                self.timestamps.reshape(-1, 1),
-                self.velocities_world,
-                speed.reshape(-1, 1),
-            )
-        ).astype(np.float64)
-
-    def save_csv(self, path, camera_frame: bool = True) -> None:
-        """
-        Save velocity samples to a CSV file.
-
-        By default, velocity is saved in the camera frame because this is the
-        format needed by the EvSLAM evaluation output.
-        """
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-
-        if camera_frame:
-            data = self.as_camera_array()
-            header = "timestamp,vx_camera,vy_camera,vz_camera,speed"
-        else:
-            data = self.as_world_array()
-            header = "timestamp,vx_world,vy_world,vz_world,speed"
-
-        np.savetxt(
-            path,
-            data,
-            fmt="%.9f",
-            delimiter=",",
-            header=header,
-            comments="",
-        )
-
 
 def compute_velocity_trajectory(
     trajectory: Trajectory,

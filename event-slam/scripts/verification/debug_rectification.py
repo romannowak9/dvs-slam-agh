@@ -19,23 +19,22 @@ if SRC_PATH.exists():
 
 from event_slam.calibration.kalibr_parser import load_stereo_calibration
 from event_slam.calibration.stereo_rectifier import StereoRectifier
-from event_slam.core.types import StereoEventWindow
 from event_slam.datasets.evslam_reader import (
     DEFAULT_LEFT_EVENT_TOPIC,
     DEFAULT_RIGHT_EVENT_TOPIC,
     EvSlamRosbagReader,
 )
 from event_slam.events.event_aggregator import (
-    BACKGROUND_INTENSITY,
     EventFrameAggregator,
     EventFrameMode,
     PolarityMode,
 )
-from event_slam.events.event_filter import BackgroundActivityFilter
+from event_slam.events.event_filter import StereoBackgroundActivityFilter
 from event_slam.events.event_window import StereoEventWindowBuilder
 
 from event_slam.debug.visualization import (
     colorize_event_frame,
+    make_side_by_side,
     save_image,
     show_image,
 )
@@ -93,18 +92,10 @@ def main() -> None:
         tau=args.tau,
     )
 
-    left_baf = None
-    right_baf = None
+    background_filter = None
 
     if args.use_baf:
-        left_baf = BackgroundActivityFilter(
-            image_shape=image_shape,
-            time_window=args.baf_time_window,
-            radius=args.baf_radius,
-            min_neighbors=args.baf_min_neighbors,
-        )
-
-        right_baf = BackgroundActivityFilter(
+        background_filter = StereoBackgroundActivityFilter(
             image_shape=image_shape,
             time_window=args.baf_time_window,
             radius=args.baf_radius,
@@ -118,12 +109,7 @@ def main() -> None:
             break
 
         if args.use_baf:
-            window = StereoEventWindow(
-                t_start=window.t_start,
-                t_end=window.t_end,
-                left=left_baf.filter(window.left),
-                right=right_baf.filter(window.right),
-            )
+            window = background_filter.filter(window)
 
         stereo_frame = aggregator.aggregate_stereo_window(window)
 
@@ -138,8 +124,8 @@ def main() -> None:
         rect_left = colorize_event_frame(rect_left_gray)
         rect_right = colorize_event_frame(rect_right_gray)
 
-        raw_pair = make_pair(raw_left, raw_right)
-        rectified_pair = make_pair(rect_left, rect_right)
+        raw_pair = make_side_by_side(raw_left, raw_right)
+        rectified_pair = make_side_by_side(rect_left, rect_right)
 
         if args.draw_lines:
             lines_pair = draw_horizontal_lines(
@@ -250,10 +236,6 @@ def print_rectification_info(rectifier: StereoRectifier) -> None:
     print(np.array2string(rectifier.P1, precision=6, suppress_small=False))
     print("P2:")
     print(np.array2string(rectifier.P2, precision=6, suppress_small=False))
-
-
-def make_pair(left: np.ndarray, right: np.ndarray) -> np.ndarray:
-    return np.concatenate((left, right), axis=1)
 
 
 def draw_horizontal_lines(image: np.ndarray, step: int) -> np.ndarray:

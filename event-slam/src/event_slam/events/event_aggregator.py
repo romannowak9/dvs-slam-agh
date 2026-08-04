@@ -220,4 +220,3 @@ class EventFrameAggregator:
             t_end = batch_t_end
 
         return float(t_start), float(t_end)
-    

@@ -6,6 +6,9 @@ from enum import Enum
 import numpy as np
 import cv2
 
+from event_slam.core.geometry import as_points_xy, empty_points
+from event_slam.core.image import to_grayscale
+
 
 class FeatureDetectorMode(str, Enum):
     FAST = "fast"
@@ -93,7 +96,7 @@ class FeatureTracker:
         On the first call, no temporal tracks exist yet. The tracker only detects
         initial features and stores them for the next frame.
         """
-        gray = self._to_gray(image)
+        gray = to_grayscale(image)
 
         if self.prev_gray is None or self.prev_points is None or len(self.prev_points) == 0:
             detected = self.detect_features(gray)
@@ -101,7 +104,7 @@ class FeatureTracker:
             self.prev_points = detected
 
             return _empty_result(
-                active_points=_points_to_xy(detected),
+                active_points=as_points_xy(detected),
                 redetected=True,
                 detected_count=len(detected),
             )
@@ -117,8 +120,8 @@ class FeatureTracker:
         )
 
         if curr_points is None or status is None:
-            tracked_prev = _empty_points()
-            tracked_curr = _empty_points()
+            tracked_prev = empty_points(2)
+            tracked_curr = empty_points(2)
             status_mask = np.zeros(len(prev_points), dtype=np.bool_)
         else:
             status_mask = status.reshape(-1).astype(np.bool_)
@@ -132,8 +135,8 @@ class FeatureTracker:
                     curr_points=curr_points,
                 )
 
-            tracked_prev = _points_to_xy(prev_points[status_mask])
-            tracked_curr = _points_to_xy(curr_points[status_mask])
+            tracked_prev = as_points_xy(prev_points[status_mask])
+            tracked_curr = as_points_xy(curr_points[status_mask])
 
         redetected = False
         detected_count = 0
@@ -153,7 +156,7 @@ class FeatureTracker:
             curr_points=tracked_curr,
             status_mask=status_mask,
             track_count=len(tracked_curr),
-            active_points=_points_to_xy(self.prev_points),
+            active_points=as_points_xy(self.prev_points),
             active_count=len(self.prev_points),
             redetected=redetected,
             detected_count=detected_count,
@@ -221,8 +224,8 @@ class FeatureTracker:
         if back_points is None or back_status is None:
             return np.zeros(len(prev_points), dtype=np.bool_)
 
-        prev_xy = _points_to_xy(prev_points)
-        back_xy = _points_to_xy(back_points)
+        prev_xy = as_points_xy(prev_points)
+        back_xy = as_points_xy(back_points)
 
         fb_error = np.linalg.norm(prev_xy - back_xy, axis=1)
         fb_ok = fb_error <= self.fb_threshold
@@ -232,7 +235,7 @@ class FeatureTracker:
     def _inside_image(self, points: np.ndarray, image_shape: tuple) -> np.ndarray:
         height, width = int(image_shape[0]), int(image_shape[1])
 
-        xy = _points_to_xy(points)
+        xy = as_points_xy(points)
 
         return (
             (xy[:, 0] >= 0.0)
@@ -241,29 +244,9 @@ class FeatureTracker:
             & (xy[:, 1] < height)
         )
 
-    def _to_gray(self, image: np.ndarray) -> np.ndarray:
-        if image.ndim == 2:
-            return image.astype(np.uint8, copy=False)
-
-        if image.ndim == 3 and image.shape[2] == 3:
-            return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-        raise ValueError(f"Unsupported image shape: {image.shape}")
-
-
-def _points_to_xy(points: np.ndarray) -> np.ndarray:
-    if points is None or len(points) == 0:
-        return _empty_points()
-
-    return points.reshape(-1, 2).astype(np.float32)
-
-
 def _empty_lk_points() -> np.ndarray:
     return np.empty((0, 1, 2), dtype=np.float32)
 
-
-def _empty_points() -> np.ndarray:
-    return np.empty((0, 2), dtype=np.float32)
 
 
 def _empty_result(
@@ -272,8 +255,8 @@ def _empty_result(
     detected_count: int,
 ) -> FeatureTrackingResult:
     return FeatureTrackingResult(
-        prev_points=_empty_points(),
-        curr_points=_empty_points(),
+        prev_points=empty_points(2),
+        curr_points=empty_points(2),
         status_mask=np.empty(0, dtype=np.bool_),
         track_count=0,
         active_points=active_points,

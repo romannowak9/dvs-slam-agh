@@ -241,7 +241,6 @@ class StereoEventWindowBuilder:
             try:
                 batch = next(batches)
             except StopIteration:
-                buffer.mark_exhausted()
                 break
 
             buffer.append(batch)
@@ -256,7 +255,6 @@ class StereoEventWindowBuilder:
             try:
                 batch = next(batches)
             except StopIteration:
-                buffer.mark_exhausted()
                 break
 
             buffer.append(batch)
@@ -290,7 +288,6 @@ class _EventBatchBuffer:
         self.camera = CameraId(camera)
         self.batches = []
 
-        self.exhausted = False
         self.last_seen_time = None
 
     @property
@@ -303,13 +300,6 @@ class _EventBatchBuffer:
             return None
 
         return float(self.batches[0].t[0])
-
-    @property
-    def last_time(self) -> float | None:
-        if self.is_empty:
-            return self.last_seen_time
-
-        return float(self.batches[-1].t[-1])
 
     def append(self, batch: EventBatch) -> None:
         if batch.camera != self.camera:
@@ -403,9 +393,6 @@ class _EventBatchBuffer:
                 )
 
         self.batches = remaining
-
-    def mark_exhausted(self) -> None:
-        self.exhausted = True
 
     def _merge_batches(self, batches) -> EventBatch:
         if len(batches) == 0:

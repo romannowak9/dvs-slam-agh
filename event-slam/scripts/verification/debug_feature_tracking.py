@@ -26,7 +26,6 @@ from event_slam.datasets.evslam_reader import (
     EvSlamRosbagReader,
 )
 from event_slam.events.event_aggregator import (
-    BACKGROUND_INTENSITY,
     EventFrameAggregator,
     EventFrameMode,
     PolarityMode,
@@ -37,6 +36,7 @@ from event_slam.vo.feature_tracker import FeatureDetectorMode, FeatureTracker
 
 from event_slam.debug.visualization import (
     colorize_event_frame,
+    draw_text_bar,
     draw_tracks,
     save_image,
     show_image,
@@ -126,7 +126,7 @@ def main() -> None:
         result = tracker.process(rectified_left)
 
         debug_image = colorize_event_frame(rectified_left)
-        draw_tracks(debug_image, result)
+        draw_tracks(debug_image, result.prev_points, result.curr_points)
         draw_stats(debug_image, result)
 
         if args.display:
@@ -232,18 +232,7 @@ def draw_stats(image: np.ndarray, result) -> None:
         f"active={result.active_count} "
         f"redetect={int(result.redetected)}"
     )
-
-    cv2.rectangle(image, (0, 0), (image.shape[1], 28), (0, 0, 0), -1)
-    cv2.putText(
-        image,
-        text,
-        (8, 19),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.55,
-        (255, 255, 255),
-        1,
-        cv2.LINE_AA,
-    )
+    draw_text_bar(image, text)
 
 
 if __name__ == "__main__":

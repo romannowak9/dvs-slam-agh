@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from event_slam.core.geometry import invert_transform
+from event_slam.core.geometry import as_float_array, as_point_array, invert_transform
 
 
 @dataclass()
@@ -12,8 +12,8 @@ class CameraModel:
     """
     A single calibrated camera model.
 
-    At this stage the class stores calibration parameters only.
-    Distortion will be handled later by the stereo rectification module.
+    The class stores calibration parameters only. Distortion is handled
+    by the stereo rectification module.
     """
 
     name: str
@@ -33,11 +33,8 @@ class CameraModel:
                 f"Invalid camera resolution: width={self.width}, height={self.height}"
             )
 
-        self.K = np.asarray(self.K, dtype=np.float64)
+        self.K = as_float_array(self.K, (3, 3), "K")
         self.D = np.asarray(self.D, dtype=np.float64).reshape(-1)
-
-        if self.K.shape != (3, 3):
-            raise ValueError(f"K must have shape (3, 3), got {self.K.shape}")
 
         if len(self.D) not in (0, 4, 5, 8):
             raise ValueError(
@@ -140,10 +137,7 @@ class CameraModel:
         This method does not remove distortion. It should be used for undistorted
         or rectified images, or only as a simple geometric helper.
         """
-        pts = np.asarray(points_px, dtype=np.float64)
-
-        if pts.ndim != 2 or pts.shape[1] != 2:
-            raise ValueError(f"points_px must have shape (N, 2), got {pts.shape}")
+        pts = as_point_array(points_px, 2, "points_px")
 
         x = (pts[:, 0] - self.cx) / self.fx
         y = (pts[:, 1] - self.cy) / self.fy
@@ -154,10 +148,7 @@ class CameraModel:
         """
         Convert normalized camera coordinates to pixel coordinates.
         """
-        pts = np.asarray(points_norm, dtype=np.float64)
-
-        if pts.ndim != 2 or pts.shape[1] != 2:
-            raise ValueError(f"points_norm must have shape (N, 2), got {pts.shape}")
+        pts = as_point_array(points_norm, 2, "points_norm")
 
         u = self.fx * pts[:, 0] + self.cx
         v = self.fy * pts[:, 1] + self.cy
@@ -179,10 +170,7 @@ class CameraModel:
         valid:
             Boolean mask indicating points with positive depth.
         """
-        pts = np.asarray(points_C, dtype=np.float64)
-
-        if pts.ndim != 2 or pts.shape[1] != 3:
-            raise ValueError(f"points_C must have shape (N, 3), got {pts.shape}")
+        pts = as_point_array(points_C, 3, "points_C")
 
         z = pts[:, 2]
         valid = z > eps
@@ -200,10 +188,7 @@ class CameraModel:
         """
         Check whether points are inside the image bounds.
         """
-        pts = np.asarray(points_px, dtype=np.float64)
-
-        if pts.ndim != 2 or pts.shape[1] != 2:
-            raise ValueError(f"points_px must have shape (N, 2), got {pts.shape}")
+        pts = as_point_array(points_px, 2, "points_px")
 
         return (
             (pts[:, 0] >= margin)
@@ -242,29 +227,19 @@ class StereoCalibration:
     timeshift_right_imu: float = 0.0
 
     def __post_init__(self) -> None:
-        self.T_C_right_C_left = np.asarray(self.T_C_right_C_left, dtype=np.float64)
-
-        if self.T_C_right_C_left.shape != (4, 4):
-            raise ValueError(
-                f"T_C_right_C_left must have shape (4, 4), "
-                f"got {self.T_C_right_C_left.shape}"
-            )
+        self.T_C_right_C_left = as_float_array(
+            self.T_C_right_C_left, (4, 4), "T_C_right_C_left"
+        )
 
         if self.T_C_left_imu is not None:
-            self.T_C_left_imu = np.asarray(self.T_C_left_imu, dtype=np.float64)
-            if self.T_C_left_imu.shape != (4, 4):
-                raise ValueError(
-                    f"T_C_left_imu must have shape (4, 4), "
-                    f"got {self.T_C_left_imu.shape}"
-                )
+            self.T_C_left_imu = as_float_array(
+                self.T_C_left_imu, (4, 4), "T_C_left_imu"
+            )
 
         if self.T_C_right_imu is not None:
-            self.T_C_right_imu = np.asarray(self.T_C_right_imu, dtype=np.float64)
-            if self.T_C_right_imu.shape != (4, 4):
-                raise ValueError(
-                    f"T_C_right_imu must have shape (4, 4), "
-                    f"got {self.T_C_right_imu.shape}"
-                )
+            self.T_C_right_imu = as_float_array(
+                self.T_C_right_imu, (4, 4), "T_C_right_imu"
+            )
 
         self.timeshift_left_imu = float(self.timeshift_left_imu)
         self.timeshift_right_imu = float(self.timeshift_right_imu)

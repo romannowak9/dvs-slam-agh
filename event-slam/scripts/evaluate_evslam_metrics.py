@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from dataclasses import dataclass
 from pathlib import Path
+import sys
 
 import numpy as np
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PROJECT_ROOT / "src"
+
+if SRC_PATH.exists():
+    sys.path.insert(0, str(SRC_PATH))
+
+from event_slam.io.result_io import load_evslam_result_array
 
 
 @dataclass
@@ -31,8 +39,8 @@ class EvSlamMetrics:
 def main() -> None:
     args = parse_args()
 
-    estimate = load_evslam_result(args.estimate)
-    ground_truth = load_evslam_result(args.ground_truth)
+    estimate = load_evslam_result_array(args.estimate)
+    ground_truth = load_evslam_result_array(args.gt)
 
     check_compatible_timestamps(
         estimate=estimate,
@@ -53,7 +61,7 @@ def main() -> None:
         metrics=metrics,
         output_path=args.output,
         estimate_path=args.estimate,
-        ground_truth_path=args.ground_truth,
+        ground_truth_path=args.gt,
         xi_min=args.xi_min,
         xi_max=args.xi_max,
         xi_count=args.xi_count,
@@ -126,45 +134,6 @@ def parse_args() -> argparse.Namespace:
     )
 
     return parser.parse_args()
-
-
-def load_evslam_result(path: Path) -> np.ndarray:
-    """
-    Load an EvSLAM result file.
-
-    Expected columns:
-        timestamp tx ty tz qx qy qz qw vx vy vz
-    """
-    path = Path(path)
-    rows = []
-
-    with open(path, "r", encoding="utf-8") as file:
-        for line_number, line in enumerate(file, start=1):
-            line = line.strip()
-
-            if not line or line.startswith("#"):
-                continue
-
-            parts = line.replace(",", " ").split()
-
-            if len(parts) != 11:
-                raise ValueError(
-                    f"Expected 11 columns in {path} at line {line_number}, "
-                    f"got {len(parts)}: {line}"
-                )
-
-            try:
-                rows.append([float(value) for value in parts])
-            except ValueError as exc:
-                raise ValueError(
-                    f"Could not parse numeric values in {path} "
-                    f"at line {line_number}: {line}"
-                ) from exc
-
-    if len(rows) == 0:
-        raise ValueError(f"No samples found in file: {path}")
-
-    return np.asarray(rows, dtype=np.float64)
 
 
 def check_compatible_timestamps(

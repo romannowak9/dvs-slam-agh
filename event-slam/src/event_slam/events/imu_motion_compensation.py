@@ -6,7 +6,7 @@ import numpy as np
 
 from event_slam.core.camera import CameraModel
 from event_slam.core.imu import imu_rotation_between_camera_times
-from event_slam.core.types import CameraId, EventBatch, StereoEventWindow
+from event_slam.core.types import EventBatch, StereoEventWindow
 
 
 @dataclass

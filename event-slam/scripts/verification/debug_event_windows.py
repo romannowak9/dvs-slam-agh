@@ -14,7 +14,7 @@ if SRC_PATH.exists():
     sys.path.insert(0, str(SRC_PATH))
 
 
-from event_slam.core.types import CameraId
+from event_slam.debug.visualization import print_section
 from event_slam.datasets.evslam_reader import (
     DEFAULT_LEFT_EVENT_TOPIC,
     DEFAULT_RIGHT_EVENT_TOPIC,
@@ -214,13 +214,6 @@ def print_sample_events(name: str, batch, sample_events: int) -> None:
             f"y={int(batch.y[index])}, "
             f"p={int(batch.p[index])}"
         )
-
-
-def print_section(title: str) -> None:
-    print()
-    print("=" * 80)
-    print(title)
-    print("=" * 80)
 
 
 if __name__ == "__main__":

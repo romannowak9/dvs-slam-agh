@@ -6,7 +6,6 @@ import argparse
 import sys
 from pathlib import Path
 
-import numpy as np
 import cv2
 
 
@@ -17,23 +16,22 @@ if SRC_PATH.exists():
     sys.path.insert(0, str(SRC_PATH))
 
 
-from event_slam.core.types import StereoEventWindow
 from event_slam.datasets.evslam_reader import (
     DEFAULT_LEFT_EVENT_TOPIC,
     DEFAULT_RIGHT_EVENT_TOPIC,
     EvSlamRosbagReader,
 )
 from event_slam.events.event_aggregator import (
-    BACKGROUND_INTENSITY,
     EventFrameAggregator,
     EventFrameMode,
     PolarityMode,
 )
-from event_slam.events.event_filter import BackgroundActivityFilter
+from event_slam.events.event_filter import StereoBackgroundActivityFilter
 from event_slam.events.event_window import StereoEventWindowBuilder
 
 from event_slam.debug.visualization import (
     colorize_event_frame,
+    make_side_by_side,
     save_image,
     show_image,
 )
@@ -82,18 +80,10 @@ def main() -> None:
         tau=args.tau,
     )
 
-    left_baf = None
-    right_baf = None
+    background_filter = None
 
     if args.use_baf:
-        left_baf = BackgroundActivityFilter(
-            image_shape=image_shape,
-            time_window=args.baf_time_window,
-            radius=args.baf_radius,
-            min_neighbors=args.baf_min_neighbors,
-        )
-
-        right_baf = BackgroundActivityFilter(
+        background_filter = StereoBackgroundActivityFilter(
             image_shape=image_shape,
             time_window=args.baf_time_window,
             radius=args.baf_radius,
@@ -110,21 +100,13 @@ def main() -> None:
         raw_right_count = len(window.right)
 
         if args.use_baf:
-            left_batch = left_baf.filter(window.left)
-            right_batch = right_baf.filter(window.right)
-
-            window = StereoEventWindow(
-                t_start=window.t_start,
-                t_end=window.t_end,
-                left=left_batch,
-                right=right_batch,
-            )
+            window = background_filter.filter(window)
 
         stereo_frame = aggregator.aggregate_stereo_window(window)
 
         left_color = colorize_event_frame(stereo_frame.left.image)
         right_color = colorize_event_frame(stereo_frame.right.image)
-        preview = np.concatenate((left_color, right_color), axis=1)
+        preview = make_side_by_side(left_color, right_color)
 
         if args.display:
             keep_running = show_image(

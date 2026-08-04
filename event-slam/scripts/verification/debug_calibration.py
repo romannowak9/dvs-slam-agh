@@ -16,18 +16,18 @@ if SRC_PATH.exists():
     sys.path.insert(0, str(SRC_PATH))
 
 
-from event_slam.calibration.kalibr_parser import load_evslam_calibration
+from event_slam.calibration.kalibr_parser import (
+    load_imu_calibration,
+    load_stereo_calibration,
+)
+from event_slam.debug.visualization import print_section, print_vector
 
 
 def main() -> None:
     args = parse_args()
 
-    calibration = load_evslam_calibration(
-        camera_yaml_path=args.camera_yaml,
-        imu_yaml_path=args.imu_yaml,
-    )
-
-    stereo = calibration.stereo
+    stereo = load_stereo_calibration(args.camera_yaml)
+    imu = load_imu_calibration(args.imu_yaml) if args.imu_yaml is not None else None
 
     print_section("Stereo calibration summary")
     print(stereo.summary())
@@ -52,17 +52,11 @@ def main() -> None:
     print(f"timeshift_right_imu [s]: {stereo.timeshift_right_imu:.12f}")
 
     print_section("IMU calibration")
-    if calibration.imu is None:
+    if imu is None:
         print("No IMU YAML file provided.")
     else:
-        imu = calibration.imu
-        print(f"name: {imu.name}")
         print(f"topic: {imu.topic}")
-        print(f"update_rate_hz: {imu.update_rate_hz}")
-        print(f"accelerometer_noise_density: {imu.accelerometer_noise_density}")
-        print(f"accelerometer_random_walk: {imu.accelerometer_random_walk}")
-        print(f"gyroscope_noise_density: {imu.gyroscope_noise_density}")
-        print(f"gyroscope_random_walk: {imu.gyroscope_random_walk}")
+        print(f"time_offset: {imu.time_offset}")
         print_matrix_or_none("T_imu_body", imu.T_imu_body)
 
 
@@ -88,13 +82,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def print_section(title: str) -> None:
-    print()
-    print("=" * 80)
-    print(title)
-    print("=" * 80)
-
-
 def print_camera(camera) -> None:
     print(f"name: {camera.name}")
     print(f"resolution: {camera.width} x {camera.height}")
@@ -115,10 +102,6 @@ def print_matrix_or_none(name: str, matrix: np.ndarray | None) -> None:
         return
 
     print_matrix(name, matrix)
-
-
-def print_vector(name: str, vector: np.ndarray) -> None:
-    print(f"{name}: {np.array2string(vector, precision=9, suppress_small=False)}")
 
 
 if __name__ == "__main__":

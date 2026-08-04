@@ -2,70 +2,24 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 import yaml
 
 from event_slam.core.camera import CameraModel, StereoCalibration
+from event_slam.core.geometry import as_float_array
 
 
 @dataclass
 class ImuCalibration:
     """
-    Minimal IMU calibration container.
-
-    This object intentionally stores only the fields that are useful at this
-    stage of the project. More IMU-specific parameters can be added later when
-    visual-inertial odometry is implemented.
+    Relevant fields from a Kalibr-style IMU calibration.
     """
 
-    name: str
     topic: Optional[str] = None
-
-    model: Optional[str] = None
     time_offset: Optional[float] = None
-    update_rate_hz: Optional[float] = None
-
-    accelerometer_noise_density: Optional[float] = None
-    accelerometer_random_walk: Optional[float] = None
-
-    gyroscope_noise_density: Optional[float] = None
-    gyroscope_random_walk: Optional[float] = None
-
-    T_body_imu: Optional[np.ndarray] = None  # maps IMU frame to body frame
-
-    raw: Optional[dict] = None
-
-    @property
-    def T_imu_body(self) -> Optional[np.ndarray]:
-        """
-        Backward-compatible alias for older code.
-
-        The stored transform maps IMU frame to body frame, so according to the
-        T_A_B convention the preferred name is T_body_imu.
-        """
-        return self.T_body_imu
-
-    @T_imu_body.setter
-    def T_imu_body(self, value: Optional[np.ndarray]) -> None:
-        self.T_body_imu = value
-
-
-@dataclass
-class EvSlamCalibration:
-    """
-    High-level calibration container for the EvSLAM stereo event setup.
-
-    The main object used by the VO pipeline is `stereo`.
-    The `imu` field is optional because stage 1 starts with pure stereo VO.
-    """
-
-    stereo: StereoCalibration
-    imu: Optional[ImuCalibration] = None
-
-    camera_yaml_path: Optional[Path] = None
-    imu_yaml_path: Optional[Path] = None
+    T_imu_body: Optional[np.ndarray] = None
 
 
 def load_stereo_calibration(camera_yaml_path) -> StereoCalibration:
@@ -129,10 +83,7 @@ def load_stereo_calibration(camera_yaml_path) -> StereoCalibration:
 
 def load_imu_calibration(imu_yaml_path) -> ImuCalibration:
     """
-    Load a Kalibr-style IMU YAML file and return a minimal ImuCalibration object.
-
-    The parser is intentionally permissive for IMU parameters because different
-    Kalibr exports and datasets may store slightly different metadata.
+    Load the IMU fields used by the gyro-only frontend.
     """
     imu_yaml_path = Path(imu_yaml_path)
     data = _load_yaml(imu_yaml_path)
@@ -140,66 +91,18 @@ def load_imu_calibration(imu_yaml_path) -> ImuCalibration:
     imu_key = _find_first_key_with_prefix(data, "imu")
     imu_data = _require_mapping(data, imu_key, "IMU YAML root")
 
+    time_offset = imu_data.get("time_offset")
+    if time_offset is not None:
+        time_offset = _parse_float(time_offset, "time_offset")
+
+    T_imu_body = imu_data.get("T_i_b")
+    if T_imu_body is not None:
+        T_imu_body = _parse_matrix4x4(T_imu_body, "T_i_b")
+
     return ImuCalibration(
-        name=imu_key,
         topic=_optional_string(imu_data, "rostopic"),
-        model=_optional_string(imu_data, "model"),
-        time_offset=_optional_float_any(
-            imu_data,
-            ["time_offset"],
-        ),
-        update_rate_hz=_optional_float_any(
-            imu_data,
-            ["update_rate", "rate_hz", "frequency"],
-        ),
-        accelerometer_noise_density=_optional_float_any(
-            imu_data,
-            ["accelerometer_noise_density", "acc_noise_density"],
-        ),
-        accelerometer_random_walk=_optional_float_any(
-            imu_data,
-            ["accelerometer_random_walk", "acc_random_walk"],
-        ),
-        gyroscope_noise_density=_optional_float_any(
-            imu_data,
-            ["gyroscope_noise_density", "gyro_noise_density"],
-        ),
-        gyroscope_random_walk=_optional_float_any(
-            imu_data,
-            ["gyroscope_random_walk", "gyro_random_walk"],
-        ),
-        T_body_imu=_optional_matrix4x4_any(
-            imu_data,
-            ["T_i_b", "T_body_imu", "T_imu_body", "T_imu_body_calib"],
-        ),
-        raw=imu_data,
-    )
-
-
-def load_evslam_calibration(
-    camera_yaml_path,
-    imu_yaml_path=None,
-) -> EvSlamCalibration:
-    """
-    Load camera and optional IMU calibration files for EvSLAM.
-
-    This is the preferred high-level entry point for scripts and future pipeline code.
-    """
-    camera_yaml_path = Path(camera_yaml_path)
-    stereo = load_stereo_calibration(camera_yaml_path)
-
-    imu = None
-    resolved_imu_yaml_path = None
-
-    if imu_yaml_path is not None:
-        resolved_imu_yaml_path = Path(imu_yaml_path)
-        imu = load_imu_calibration(resolved_imu_yaml_path)
-
-    return EvSlamCalibration(
-        stereo=stereo,
-        imu=imu,
-        camera_yaml_path=camera_yaml_path,
-        imu_yaml_path=resolved_imu_yaml_path,
+        time_offset=time_offset,
+        T_imu_body=T_imu_body,
     )
 
 
@@ -300,12 +203,7 @@ def _parse_resolution(value: object, field_name: str) -> Tuple[int, int]:
 
 
 def _parse_matrix4x4(value: object, field_name: str) -> np.ndarray:
-    arr = np.asarray(value, dtype=np.float64)
-
-    if arr.shape != (4, 4):
-        raise ValueError(f"{field_name} must have shape (4, 4), got {arr.shape}")
-
-    return arr
+    return as_float_array(value, (4, 4), field_name)
 
 
 def _parse_float(value: object, field_name: str) -> float:
@@ -356,22 +254,6 @@ def _optional_string(mapping: dict, key: str) -> Optional[str]:
         raise ValueError(f"Optional field '{key}' must be a string if present")
 
     return value
-
-
-def _optional_float_any(mapping: dict, keys: List[str]) -> Optional[float]:
-    for key in keys:
-        if key in mapping and mapping[key] is not None:
-            return _parse_float(mapping[key], key)
-
-    return None
-
-
-def _optional_matrix4x4_any(mapping: dict, keys: List[str]) -> Optional[np.ndarray]:
-    for key in keys:
-        if key in mapping and mapping[key] is not None:
-            return _parse_matrix4x4(mapping[key], key)
-
-    return None
 
 
 def _find_first_key_with_prefix(mapping: dict, prefix: str) -> str:

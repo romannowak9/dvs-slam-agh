@@ -17,12 +17,40 @@ def as_float_array(array: np.ndarray, shape: tuple[int, ...], name: str) -> np.n
     return arr
 
 
+def empty_points(dimensions: int, dtype=np.float32) -> np.ndarray:
+    """Return an empty point array with the requested dimensionality."""
+    return np.empty((0, int(dimensions)), dtype=dtype)
+
+
+def as_point_array(points: np.ndarray, dimensions: int, name: str) -> np.ndarray:
+    points = np.asarray(points, dtype=np.float64)
+
+    if points.ndim != 2 or points.shape[1] != dimensions:
+        raise ValueError(
+            f"{name} must have shape (N, {dimensions}), got {points.shape}"
+        )
+
+    return points
+
+
+def as_points_xy(points: np.ndarray) -> np.ndarray:
+    if points is None:
+        return empty_points(2)
+
+    points = np.asarray(points, dtype=np.float32)
+
+    if points.size == 0:
+        return empty_points(2)
+
+    return points.reshape(-1, 2)
+
+
 def skew(v: np.ndarray) -> np.ndarray:
     """
     Return the skew-symmetric matrix [v]_x.
 
-    This is useful for cross products and later for epipolar geometry,
-    Lie algebra operations and Jacobians.
+    Used for cross products, epipolar geometry, Lie algebra operations
+    and Jacobians.
     """
     v = as_float_array(v, (3,), "v")
 

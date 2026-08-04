@@ -7,9 +7,10 @@ import numpy as np
 
 from event_slam.core.geometry import (
     Pose,
+    as_float_array,
+    empty_points,
     invert_transform,
     make_transform,
-    rotmat_to_quat_xyzw,
 )
 from event_slam.core.imu import rotation_angle_deg, rotation_error_deg
 from event_slam.core.trajectory import Trajectory
@@ -47,14 +48,23 @@ class StereoPnPVOResult:
     message: str = ""
 
     tracked_points_curr: np.ndarray = field(
-        default_factory=lambda: np.empty((0, 2), dtype=np.float32)
+        default_factory=lambda: empty_points(2)
     )
     pnp_points_curr: np.ndarray = field(
-        default_factory=lambda: np.empty((0, 2), dtype=np.float32)
+        default_factory=lambda: empty_points(2)
     )
     pnp_inlier_points_curr: np.ndarray = field(
-        default_factory=lambda: np.empty((0, 2), dtype=np.float32)
+        default_factory=lambda: empty_points(2)
     )
+
+
+@dataclass
+class StereoPnPVOSummary:
+    processed_frames: int
+    successful_steps: int
+    failed_frames: int
+    median_inliers: float
+    final_position: np.ndarray
 
 
 class StereoPnPVO:
@@ -104,16 +114,15 @@ class StereoPnPVO:
         imu_rotation_prior_max_error_deg: float = 3.0,
         imu_rotation_prior_reject_bad_pnp: bool = False,
     ) -> None:
-        self.K = np.asarray(K, dtype=np.float64)
-        self.P1 = np.asarray(P1, dtype=np.float64)
-        self.P2 = np.asarray(P2, dtype=np.float64)
+        self.K = as_float_array(K, (3, 3), "K")
+        self.P1 = as_float_array(P1, (3, 4), "P1")
+        self.P2 = as_float_array(P2, (3, 4), "P2")
 
         if R_rect_left_from_left is None:
             self.R_rect_left_from_left = np.eye(3, dtype=np.float64)
         else:
-            self.R_rect_left_from_left = np.asarray(
-                R_rect_left_from_left,
-                dtype=np.float64,
+            self.R_rect_left_from_left = as_float_array(
+                R_rect_left_from_left, (3, 3), "R_rect_left_from_left"
             )
 
         self.R_left_from_rect_left = self.R_rect_left_from_left.T
@@ -121,30 +130,8 @@ class StereoPnPVO:
         if R_output_from_pnp_camera is None:
             self.R_output_from_pnp_camera = np.eye(3, dtype=np.float64)
         else:
-            self.R_output_from_pnp_camera = np.asarray(
-                R_output_from_pnp_camera,
-                dtype=np.float64,
-            )
-
-        if self.K.shape != (3, 3):
-            raise ValueError(f"K must have shape (3, 3), got {self.K.shape}")
-
-        if self.P1.shape != (3, 4):
-            raise ValueError(f"P1 must have shape (3, 4), got {self.P1.shape}")
-
-        if self.P2.shape != (3, 4):
-            raise ValueError(f"P2 must have shape (3, 4), got {self.P2.shape}")
-
-        if self.R_rect_left_from_left.shape != (3, 3):
-            raise ValueError(
-                "R_rect_left_from_left must have shape "
-                f"(3, 3), got {self.R_rect_left_from_left.shape}"
-            )
-
-        if self.R_output_from_pnp_camera.shape != (3, 3):
-            raise ValueError(
-                "R_output_from_pnp_camera must have shape "
-                f"(3, 3), got {self.R_output_from_pnp_camera.shape}"
+            self.R_output_from_pnp_camera = as_float_array(
+                R_output_from_pnp_camera, (3, 3), "R_output_from_pnp_camera"
             )
 
         feature_tracker_params = feature_tracker_params or {}
@@ -191,10 +178,31 @@ class StereoPnPVO:
         self.initialized = False
         self.T_W_Cleft = np.eye(4, dtype=np.float64)
 
-        self.prev_points_3d_rect = np.empty((0, 3), dtype=np.float64)
+        self.prev_points_3d_rect = empty_points(3, dtype=np.float64)
 
         self.trajectory = Trajectory()
         self.results = []
+
+    def get_summary(self) -> StereoPnPVOSummary:
+        inliers = [
+            result.pnp_inlier_count
+            for result in self.results
+            if result.pnp_inlier_count > 0
+        ]
+        median_inliers = float(np.median(inliers)) if inliers else np.nan
+        final_position = (
+            self.results[-1].T_W_Cleft[:3, 3].copy()
+            if self.results
+            else np.zeros(3, dtype=np.float64)
+        )
+
+        return StereoPnPVOSummary(
+            processed_frames=len(self.results),
+            successful_steps=sum(result.success for result in self.results),
+            failed_frames=sum(not result.success for result in self.results),
+            median_inliers=median_inliers,
+            final_position=final_position,
+        )
 
     def process(
         self,
@@ -243,46 +251,6 @@ class StereoPnPVO:
         self._append_result(result)
         return result
 
-    def save_csv(self, path) -> None:
-        """
-        Save trajectory together with basic VO diagnostics to CSV.
-
-        This is intentionally separate from Trajectory, because it stores VO-specific
-        status fields, not only poses.
-        """
-        with open(path, "w", encoding="utf-8") as file:
-            file.write(
-                "timestamp,success,tx,ty,tz,qx,qy,qz,qw,"
-                "track_count,pnp_point_count,pnp_inlier_count,"
-                "reprojection_error_mean,reprojection_error_median,"
-                "pnp_rotation_step_deg,imu_rotation_step_deg,"
-                "pnp_imu_rotation_error_deg,imu_rotation_consistent,"
-                "imu_rejected,message\n"
-            )
-
-            for result in self.results:
-                T_W_C = result.T_W_Cleft
-                t = T_W_C[:3, 3]
-                qx, qy, qz, qw = rotmat_to_quat_xyzw(T_W_C[:3, :3])
-
-                file.write(
-                    f"{result.timestamp:.9f},"
-                    f"{int(result.success)},"
-                    f"{t[0]:.9f},{t[1]:.9f},{t[2]:.9f},"
-                    f"{qx:.9f},{qy:.9f},{qz:.9f},{qw:.9f},"
-                    f"{result.track_count},"
-                    f"{result.pnp_point_count},"
-                    f"{result.pnp_inlier_count},"
-                    f"{result.reprojection_error_mean:.9f},"
-                    f"{result.reprojection_error_median:.9f},"
-                    f"{result.pnp_rotation_step_deg:.9f},"
-                    f"{result.imu_rotation_step_deg:.9f},"
-                    f"{result.pnp_imu_rotation_error_deg:.9f},"
-                    f"{int(result.imu_rotation_consistent)},"
-                    f"{int(result.imu_rejected)},"
-                    f"{_csv_safe(result.message)}\n"
-                )
-
     def _estimate_current_pose(
         self,
         left_rectified: np.ndarray,
@@ -308,7 +276,7 @@ class StereoPnPVO:
         imu_rotation_consistent = False
         imu_rejected = False
 
-        pnp_inlier_points_curr = np.empty((0, 2), dtype=np.float32)
+        pnp_inlier_points_curr = empty_points(2)
 
         if len(pnp_object_points) >= self.min_pnp_points:
             (
@@ -369,12 +337,12 @@ class StereoPnPVO:
 
     def _make_pnp_correspondences(self, tracking_result) -> tuple:
         if len(self.prev_points_3d_rect) == 0:
-            return _empty_points3(), _empty_points2()
+            return empty_points(3, dtype=np.float64), empty_points(2)
 
         status_mask = tracking_result.status_mask
 
         if len(status_mask) != len(self.prev_points_3d_rect):
-            return _empty_points3(), _empty_points2()
+            return empty_points(3, dtype=np.float64), empty_points(2)
 
         object_points = self.prev_points_3d_rect[status_mask]
         image_points = tracking_result.curr_points
@@ -400,17 +368,10 @@ class StereoPnPVO:
         empty_inliers = np.zeros(len(object_points), dtype=np.bool_)
 
         if len(object_points) < 6:
-            return (
+            return _make_pnp_solution(
                 False,
                 np.eye(4, dtype=np.float64),
                 empty_inliers,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                False,
-                False,
                 f"too few PnP points: {len(object_points)}",
             )
 
@@ -426,32 +387,18 @@ class StereoPnPVO:
                 flags=self.pnp_flags,
             )
         except cv2.error:
-            return (
+            return _make_pnp_solution(
                 False,
                 np.eye(4, dtype=np.float64),
                 empty_inliers,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                False,
-                False,
                 "solvePnPRansac cv2 error",
             )
 
         if not ok or inliers is None:
-            return (
+            return _make_pnp_solution(
                 False,
                 np.eye(4, dtype=np.float64),
                 empty_inliers,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                False,
-                False,
                 "solvePnPRansac failed",
             )
 
@@ -464,32 +411,18 @@ class StereoPnPVO:
         inlier_ratio = inlier_count / max(1, len(object_points))
 
         if inlier_count < self.min_pnp_inliers:
-            return (
+            return _make_pnp_solution(
                 False,
                 np.eye(4, dtype=np.float64),
                 inlier_mask,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                False,
-                False,
                 f"too few PnP inliers: {inlier_count}",
             )
 
         if inlier_ratio < self.min_pnp_inlier_ratio:
-            return (
+            return _make_pnp_solution(
                 False,
                 np.eye(4, dtype=np.float64),
                 inlier_mask,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                np.nan,
-                False,
-                False,
                 f"PnP inlier ratio too low: {inlier_ratio:.3f}",
             )
 
@@ -533,50 +466,50 @@ class StereoPnPVO:
                 )
 
         if error_median > self.max_pnp_reprojection_median:
-            return (
+            return _make_pnp_solution(
                 False,
                 T_Ck_Cprev,
                 inlier_mask,
+                f"PnP reprojection error too high: {error_median:.3f}",
                 error_mean,
                 error_median,
                 pnp_rotation_step_deg,
                 imu_rotation_step_deg,
                 pnp_imu_rotation_error_deg,
                 imu_rotation_consistent,
-                False,
-                f"PnP reprojection error too high: {error_median:.3f}",
+                imu_rejected=False,
             )
 
         translation_step = float(np.linalg.norm(T_Ck_Cprev[:3, 3]))
 
         if translation_step > self.max_translation_step:
-            return (
+            return _make_pnp_solution(
                 False,
                 T_Ck_Cprev,
                 inlier_mask,
+                f"translation step too large: {translation_step:.3f}",
                 error_mean,
                 error_median,
                 pnp_rotation_step_deg,
                 imu_rotation_step_deg,
                 pnp_imu_rotation_error_deg,
                 imu_rotation_consistent,
-                False,
-                f"translation step too large: {translation_step:.3f}",
+                imu_rejected=False,
             )
 
         if pnp_rotation_step_deg > self.max_rotation_step_deg:
-            return (
+            return _make_pnp_solution(
                 False,
                 T_Ck_Cprev,
                 inlier_mask,
+                f"rotation step too large: {pnp_rotation_step_deg:.3f}",
                 error_mean,
                 error_median,
                 pnp_rotation_step_deg,
                 imu_rotation_step_deg,
                 pnp_imu_rotation_error_deg,
                 imu_rotation_consistent,
-                False,
-                f"rotation step too large: {pnp_rotation_step_deg:.3f}",
+                imu_rejected=False,
             )
 
         if (
@@ -585,35 +518,35 @@ class StereoPnPVO:
             and np.isfinite(pnp_imu_rotation_error_deg)
             and not imu_rotation_consistent
         ):
-            return (
+            return _make_pnp_solution(
                 False,
                 T_Ck_Cprev,
                 inlier_mask,
+                (
+                    "PnP rejected by IMU rotation prior: "
+                    f"{pnp_imu_rotation_error_deg:.3f} deg"
+                ),
                 error_mean,
                 error_median,
                 pnp_rotation_step_deg,
                 imu_rotation_step_deg,
                 pnp_imu_rotation_error_deg,
                 imu_rotation_consistent,
-                True,
-                (
-                    "PnP rejected by IMU rotation prior: "
-                    f"{pnp_imu_rotation_error_deg:.3f} deg"
-                ),
+                imu_rejected=True,
             )
 
-        return (
+        return _make_pnp_solution(
             True,
             T_Ck_Cprev,
             inlier_mask,
+            "ok",
             error_mean,
             error_median,
             pnp_rotation_step_deg,
             imu_rotation_step_deg,
             pnp_imu_rotation_error_deg,
             imu_rotation_consistent,
-            False,
-            "ok",
+            imu_rejected=False,
         )
 
     def _compute_reprojection_error(
@@ -698,13 +631,29 @@ class StereoPnPVO:
         return make_transform(R, t)
 
 
-def _empty_points2() -> np.ndarray:
-    return np.empty((0, 2), dtype=np.float32)
-
-
-def _empty_points3() -> np.ndarray:
-    return np.empty((0, 3), dtype=np.float64)
-
-
-def _csv_safe(value: str) -> str:
-    return str(value).replace(",", ";").replace("\n", " ")
+def _make_pnp_solution(
+    success: bool,
+    T_Ck_Cprev: np.ndarray,
+    inlier_mask: np.ndarray,
+    message: str,
+    reprojection_error_mean: float = np.nan,
+    reprojection_error_median: float = np.nan,
+    pnp_rotation_step_deg: float = np.nan,
+    imu_rotation_step_deg: float = np.nan,
+    pnp_imu_rotation_error_deg: float = np.nan,
+    imu_rotation_consistent: bool = False,
+    imu_rejected: bool = False,
+) -> tuple:
+    return (
+        success,
+        T_Ck_Cprev,
+        inlier_mask,
+        reprojection_error_mean,
+        reprojection_error_median,
+        pnp_rotation_step_deg,
+        imu_rotation_step_deg,
+        pnp_imu_rotation_error_deg,
+        imu_rotation_consistent,
+        imu_rejected,
+        message,
+    )

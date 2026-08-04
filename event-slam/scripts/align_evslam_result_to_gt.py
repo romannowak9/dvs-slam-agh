@@ -16,7 +16,7 @@ if SRC_PATH.exists():
 from event_slam.core.geometry import Pose, invert_transform, make_transform
 from event_slam.core.trajectory import Trajectory
 from event_slam.core.velocity import VelocityTrajectory
-from event_slam.io.result_writer import write_trajectory_at_timestamps
+from event_slam.io.result_io import load_evslam_result, write_trajectory_at_timestamps
 
 
 def main() -> None:
@@ -149,75 +149,6 @@ def parse_args() -> argparse.Namespace:
     )
 
     return parser.parse_args()
-
-
-def load_evslam_result(path: Path) -> tuple:
-    """
-    Load EvSLAM 11-column result as pose and velocity trajectories.
-
-    Expected format:
-        timestamp tx ty tz qx qy qz qw vx vy vz
-
-    Velocity in the file is expressed in the camera frame. VelocityTrajectory
-    stores both world-frame and camera-frame velocity, so world-frame velocity
-    is reconstructed with:
-
-        v_W = R_W_C @ v_C
-    """
-    data = load_evslam_result_array(path)
-
-    trajectory = Trajectory()
-    velocity = VelocityTrajectory()
-
-    for row in data:
-        timestamp = float(row[0])
-        position = row[1:4]
-        quat_xyzw = row[4:8]
-        velocity_camera = row[8:11]
-
-        pose = Pose.from_quat_xyzw(
-            q_xyzw=quat_xyzw,
-            t=position,
-        )
-        velocity_world = pose.R @ velocity_camera
-
-        trajectory.append(
-            timestamp=timestamp,
-            pose=pose,
-        )
-        velocity.append(
-            timestamp=timestamp,
-            velocity_world=velocity_world,
-            velocity_camera=velocity_camera,
-        )
-
-    return trajectory, velocity
-
-
-def load_evslam_result_array(path: Path) -> np.ndarray:
-    rows = []
-
-    with path.open("r", encoding="utf-8") as file:
-        for line_number, line in enumerate(file, start=1):
-            line = line.strip()
-
-            if not line or line.startswith("#"):
-                continue
-
-            parts = line.split()
-
-            if len(parts) != 11:
-                raise ValueError(
-                    f"Expected 11 columns in {path}:{line_number}, "
-                    f"got {len(parts)}"
-                )
-
-            rows.append([float(value) for value in parts])
-
-    if not rows:
-        raise ValueError(f"No data rows found in {path}")
-
-    return np.asarray(rows, dtype=np.float64)
 
 
 def match_timestamps(

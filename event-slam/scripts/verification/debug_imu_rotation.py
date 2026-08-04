@@ -17,15 +17,15 @@ from event_slam.calibration.kalibr_parser import (
     load_imu_calibration,
     load_stereo_calibration,
 )
-from event_slam.core.geometry import Pose
 from event_slam.core.imu import (
+    ImuCoverageError,
     camera_time_to_imu_time,
-    load_imu_gyro_from_evslam_reader,
     imu_rotation_between_camera_times,
     relative_camera_rotation_from_poses,
     rotation_angle_deg,
 )
 from event_slam.core.trajectory import Trajectory
+from event_slam.io.result_io import load_evslam_result
 from event_slam.datasets.evslam_reader import EvSlamRosbagReader
 
 
@@ -52,11 +52,10 @@ def main() -> None:
             "IMU topic was not provided and could not be read from IMU calibration"
         )
 
-    trajectory = load_evslam_result_as_trajectory(args.estimate)
-    imu_timestamps, angular_velocities = load_imu_gyro_from_evslam_reader(
-        reader=EvSlamRosbagReader(bag_path=args.bag),
-        imu_topic=imu_topic,
-    )
+    trajectory, _ = load_evslam_result(args.estimate)
+    imu_timestamps, angular_velocities = EvSlamRosbagReader(
+        bag_path=args.bag
+    ).load_imu_gyro(topic=imu_topic)
 
     timeshift_cam_imu = stereo.timeshift_left_imu + args.extra_timeshift
     imu_time_offset = imu_calibration.time_offset or 0.0
@@ -154,50 +153,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_evslam_result_as_trajectory(path: Path) -> Trajectory:
-    """
-    Load EvSLAM 11-column result as a pose trajectory.
-
-    Expected format:
-        timestamp tx ty tz qx qy qz qw vx vy vz
-
-    Velocity columns are not used by this diagnostic script.
-    """
-    trajectory = Trajectory()
-
-    with path.open("r", encoding="utf-8") as file:
-        for line_number, line in enumerate(file, start=1):
-            line = line.strip()
-
-            if not line or line.startswith("#"):
-                continue
-
-            parts = line.split()
-
-            if len(parts) != 11:
-                raise ValueError(
-                    f"Expected 11 columns in {path}:{line_number}, "
-                    f"got {len(parts)}"
-                )
-
-            values = np.asarray([float(value) for value in parts], dtype=np.float64)
-
-            pose = Pose.from_quat_xyzw(
-                q_xyzw=values[4:8],
-                t=values[1:4],
-            )
-
-            trajectory.append(
-                timestamp=float(values[0]),
-                pose=pose,
-            )
-
-    if trajectory.is_empty:
-        raise ValueError(f"No trajectory samples found in {path}")
-
-    return trajectory
-
-
 def compute_rotation_diagnostics(
     trajectory: Trajectory,
     imu_timestamps: np.ndarray,
@@ -245,7 +200,7 @@ def compute_rotation_diagnostics(
                 imu_time_offset=imu_time_offset,
                 R_output_from_camera=R_OUT_FROM_PNP_CAMERA,
             )
-        except ValueError:
+        except ImuCoverageError:
             continue
 
         R_pnp = relative_camera_rotation_from_poses(

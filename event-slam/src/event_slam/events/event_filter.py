@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from event_slam.core.types import EventBatch
+from event_slam.core.types import EventBatch, StereoEventWindow
 
 
 class BackgroundActivityFilter:
@@ -103,24 +103,33 @@ class BackgroundActivityFilter:
         return 0 <= x < self.width and 0 <= y < self.height
 
 
-def filter_background_activity(
-    batch: EventBatch,
-    image_shape: tuple,
-    time_window: float = 1.0 / 24.0,
-    radius: int = 2,
-    min_neighbors: int = 1,
-) -> EventBatch:
-    """
-    Convenience stateless BAF call for one batch.
+class StereoBackgroundActivityFilter:
+    """Apply independent stateful BAF filters to a stereo event stream."""
 
-    For continuous processing, prefer BackgroundActivityFilter because it keeps
-    timestamp history across consecutive windows.
-    """
-    event_filter = BackgroundActivityFilter(
-        image_shape=image_shape,
-        time_window=time_window,
-        radius=radius,
-        min_neighbors=min_neighbors,
-    )
+    def __init__(
+        self,
+        image_shape: tuple,
+        time_window: float,
+        radius: int,
+        min_neighbors: int,
+    ) -> None:
+        params = {
+            "image_shape": image_shape,
+            "time_window": time_window,
+            "radius": radius,
+            "min_neighbors": min_neighbors,
+        }
+        self.left = BackgroundActivityFilter(**params)
+        self.right = BackgroundActivityFilter(**params)
 
-    return event_filter.filter(batch)
+    def reset(self) -> None:
+        self.left.reset()
+        self.right.reset()
+
+    def filter(self, window: StereoEventWindow) -> StereoEventWindow:
+        return StereoEventWindow(
+            t_start=window.t_start,
+            t_end=window.t_end,
+            left=self.left.filter(window.left),
+            right=self.right.filter(window.right),
+        )
