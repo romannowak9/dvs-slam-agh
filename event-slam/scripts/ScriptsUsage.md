@@ -361,3 +361,18 @@ python3 scripts/verification/debug_imu_motion_compensation.py \
 ```
 
 Use `--display` instead of `--save-preview` for an interactive preview.
+
+## Sparse SLAM map verification
+
+Save every keyframe with its landmark observations and create a 3D map plot:
+
+```bash
+python3 scripts/verification/debug_slam_map.py \
+  --config configs/evslam_seq007_test_slam.yaml \
+  --num-frames 120
+```
+
+Green points are landmarks created in the displayed keyframe. Yellow points
+are landmarks already present in an earlier keyframe. Add `--display` to show
+the keyframes while the pipeline is running. Images are saved in
+`outputs/debug_slam_map` by default.
