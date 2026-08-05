@@ -14,6 +14,7 @@ from event_slam.core.geometry import (
 )
 from event_slam.core.imu import rotation_angle_deg, rotation_error_deg
 from event_slam.core.trajectory import Trajectory
+from event_slam.slam.map import SparseMap
 from event_slam.vo.feature_tracker import FeatureTracker
 from event_slam.vo.stereo_depth import StereoDepthEstimator
 
@@ -65,11 +66,13 @@ class StereoPnPVOSummary:
     failed_frames: int
     median_inliers: float
     final_position: np.ndarray
+    keyframe_count: int = 0
+    landmark_count: int = 0
 
 
 class StereoPnPVO:
     """
-    ELOPE-like stereo visual odometry frontend.
+    Stereo visual odometry frontend.
 
     The class estimates camera motion from sparse stereo depth and temporal
     feature tracking:
@@ -113,6 +116,7 @@ class StereoPnPVO:
         R_output_from_pnp_camera=None,
         imu_rotation_prior_max_error_deg: float = 3.0,
         imu_rotation_prior_reject_bad_pnp: bool = False,
+        slam_params=None,
     ) -> None:
         self.K = as_float_array(K, (3, 3), "K")
         self.P1 = as_float_array(P1, (3, 4), "P1")
@@ -165,6 +169,24 @@ class StereoPnPVO:
             imu_rotation_prior_reject_bad_pnp
         )
 
+        slam_params = slam_params or {}
+        self.slam_enabled = bool(slam_params.get("enabled", False))
+        self.keyframe_min_frame_gap = int(slam_params.get("min_frame_gap", 5))
+        self.keyframe_translation_depth_ratio = float(
+            slam_params.get("translation_depth_ratio", 0.15)
+        )
+        self.keyframe_rotation_deg = float(slam_params.get("rotation_deg", 10.0))
+        self.keyframe_tracked_landmark_ratio = float(
+            slam_params.get("tracked_landmark_ratio", 0.6)
+        )
+        self.max_landmark_depth = float(
+            slam_params.get("max_landmark_depth", 10.0)
+        )
+
+        self.R_C_Crect = (
+            self.R_output_from_pnp_camera @ self.R_left_from_rect_left
+        )
+
         self.dist_coeffs = np.zeros((4, 1), dtype=np.float64)
 
         self.reset()
@@ -182,6 +204,7 @@ class StereoPnPVO:
 
         self.trajectory = Trajectory()
         self.results = []
+        self.map = SparseMap() if self.slam_enabled else None
 
     def get_summary(self) -> StereoPnPVOSummary:
         inliers = [
@@ -202,6 +225,8 @@ class StereoPnPVO:
             failed_frames=sum(not result.success for result in self.results),
             median_inliers=median_inliers,
             final_position=final_position,
+            keyframe_count=len(self.map.keyframes) if self.map is not None else 0,
+            landmark_count=len(self.map.landmarks) if self.map is not None else 0,
         )
 
     def process(
@@ -237,6 +262,7 @@ class StereoPnPVO:
                 message="initialized",
             )
 
+            self._update_map(left_rectified, tracking_result, result)
             self._append_result(result)
             return result
 
@@ -248,8 +274,80 @@ class StereoPnPVO:
             imu_rotation_prior=imu_rotation_prior,
         )
 
+        self._update_map(left_rectified, tracking_result, result)
         self._append_result(result)
         return result
+
+    def _update_map(self, left_rectified, tracking_result, result) -> None:
+        if self.map is None or not result.success:
+            return
+
+        frame_index = len(self.results)
+        if not self._should_create_keyframe(frame_index, tracking_result.active_ids):
+            return
+
+        descriptors, indices = self.tracker.describe(
+            left_rectified,
+            tracking_result.active_points,
+        )
+        if len(indices) == 0:
+            return
+
+        points_3d_rect = self.prev_points_3d_rect[indices]
+        valid = np.isfinite(points_3d_rect).all(axis=1)
+        valid[valid] = (
+            (points_3d_rect[valid, 2] > 0.0)
+            & (points_3d_rect[valid, 2] <= self.max_landmark_depth)
+        )
+        if not np.any(valid):
+            return
+
+        self.map.add_keyframe(
+            frame_index=frame_index,
+            timestamp=result.timestamp,
+            T_W_C=result.T_W_Cleft,
+            points_2d=tracking_result.active_points[indices][valid],
+            points_C=self._rectified_points_to_output_camera(points_3d_rect[valid]),
+            descriptors=descriptors[valid],
+            track_ids=tracking_result.active_ids[indices][valid],
+        )
+
+    def _should_create_keyframe(
+        self,
+        frame_index: int,
+        active_track_ids: np.ndarray,
+    ) -> bool:
+        last_keyframe = self.map.last_keyframe
+        if last_keyframe is None:
+            return True
+
+        if frame_index - last_keyframe.frame_index < self.keyframe_min_frame_gap:
+            return False
+
+        T_Clast_C = invert_transform(last_keyframe.T_W_C) @ self.T_W_Cleft
+        translation = float(np.linalg.norm(T_Clast_C[:3, 3]))
+        rotation_deg = rotation_angle_deg(T_Clast_C[:3, :3])
+
+        depths = self.prev_points_3d_rect[:, 2]
+        depths = depths[np.isfinite(depths)]
+        depths = depths[depths > 0.0]
+        translation_ratio = (
+            translation / float(np.median(depths)) if len(depths) else 0.0
+        )
+        tracked_ratio = self.map.tracked_landmark_count(active_track_ids) / max(
+            1,
+            len(active_track_ids),
+        )
+
+        return (
+            translation_ratio >= self.keyframe_translation_depth_ratio
+            or rotation_deg >= self.keyframe_rotation_deg
+            or tracked_ratio < self.keyframe_tracked_landmark_ratio
+        )
+
+    def _rectified_points_to_output_camera(self, points_3d: np.ndarray) -> np.ndarray:
+        """Convert rectified-left points to the camera frame used by T_W_Cleft."""
+        return (self.R_C_Crect @ np.asarray(points_3d, dtype=np.float64).T).T
 
     def _estimate_current_pose(
         self,

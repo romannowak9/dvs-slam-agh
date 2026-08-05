@@ -38,6 +38,21 @@ def save_outputs(pipeline, config: dict, interrupted: bool = False) -> tuple:
     )
     write_vo_csv(pipeline.vo.results, trajectory_path)
 
+    keyframes_path = None
+    landmarks_path = None
+    sparse_map = getattr(pipeline.vo, "map", None)
+    if sparse_map is not None:
+        keyframes_path = _resolve_output_path(
+            output_dir,
+            output_cfg.get("keyframes_csv", "keyframes.csv"),
+        )
+        landmarks_path = _resolve_output_path(
+            output_dir,
+            output_cfg.get("landmarks_csv", "landmarks.csv"),
+        )
+        write_keyframes_csv(sparse_map.keyframes, keyframes_path)
+        write_landmarks_csv(sparse_map.landmarks.values(), landmarks_path)
+
     velocity_path = None
     if bool(velocity_cfg.get("enabled", False)):
         velocity = pipeline.compute_velocity()
@@ -71,6 +86,8 @@ def save_outputs(pipeline, config: dict, interrupted: bool = False) -> tuple:
         velocity_path,
         result_path,
         result_stats,
+        keyframes_path,
+        landmarks_path,
     )
 
     if interrupted:
@@ -130,6 +147,48 @@ def write_velocity_csv(velocity: VelocityTrajectory, path) -> None:
         header="timestamp,vx_camera,vy_camera,vz_camera,speed",
         comments="",
     )
+
+
+def write_keyframes_csv(keyframes, path) -> None:
+    """Write keyframe poses and map point counts."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with path.open("w", encoding="utf-8") as file:
+        file.write(
+            "id,frame_index,timestamp,tx,ty,tz,qx,qy,qz,qw,point_count\n"
+        )
+        for keyframe in keyframes:
+            t = keyframe.T_W_C[:3, 3]
+            qx, qy, qz, qw = rotmat_to_quat_xyzw(keyframe.T_W_C[:3, :3])
+            file.write(
+                f"{keyframe.id},{keyframe.frame_index},{keyframe.timestamp:.9f},"
+                f"{t[0]:.9f},{t[1]:.9f},{t[2]:.9f},"
+                f"{qx:.9f},{qy:.9f},{qz:.9f},{qw:.9f},"
+                f"{keyframe.point_count}\n"
+            )
+
+
+def write_landmarks_csv(landmarks, path) -> None:
+    """Write sparse map landmarks and observation counts."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with path.open("w", encoding="utf-8") as file:
+        file.write(
+            "id,anchor_keyframe_id,x_anchor,y_anchor,z_anchor,"
+            "x_world,y_world,z_world,observation_count,last_seen_keyframe_id\n"
+        )
+        for landmark in sorted(landmarks, key=lambda item: item.id):
+            x_C = landmark.position_C_anchor
+            x_W = landmark.position_W
+            file.write(
+                f"{landmark.id},{landmark.anchor_keyframe_id},"
+                f"{x_C[0]:.9f},{x_C[1]:.9f},{x_C[2]:.9f},"
+                f"{x_W[0]:.9f},{x_W[1]:.9f},{x_W[2]:.9f},"
+                f"{landmark.observation_count},"
+                f"{landmark.last_seen_keyframe_id}\n"
+            )
 
 
 def load_evslam_result_array(path) -> np.ndarray:
@@ -393,6 +452,8 @@ def _print_summary(summary) -> None:
     print(f"motion_compensation_failed: {summary.motion_compensation_failed}")
     print(f"imu_prior_available_frames: {summary.imu_prior_available_frames}")
     print(f"imu_rejected_steps: {summary.imu_rejected_steps}")
+    print(f"keyframes: {summary.keyframe_count}")
+    print(f"landmarks: {summary.landmark_count}")
     print(
         "final_position: "
         f"[{summary.final_position[0]:.6f}, "
@@ -406,6 +467,8 @@ def _print_saved_outputs(
     velocity_path,
     result_path,
     result_stats,
+    keyframes_path,
+    landmarks_path,
 ) -> None:
     print()
     print("Saved outputs")
@@ -424,6 +487,10 @@ def _print_saved_outputs(
                 f"written={result_stats.written_count}, "
                 f"skipped={result_stats.skipped_count}"
             )
+
+    if keyframes_path is not None:
+        print(f"keyframes_csv: {keyframes_path}")
+        print(f"landmarks_csv: {landmarks_path}")
 
 
 def _resolve_output_path(output_dir: Path, path_value) -> Path:

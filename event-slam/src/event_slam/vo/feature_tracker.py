@@ -24,9 +24,11 @@ class FeatureTrackingResult:
     prev_points: np.ndarray
     curr_points: np.ndarray
     status_mask: np.ndarray
+    tracked_ids: np.ndarray
 
     track_count: int
     active_points: np.ndarray
+    active_ids: np.ndarray
     active_count: int
 
     redetected: bool
@@ -81,6 +83,9 @@ class FeatureTracker:
 
         self.prev_gray = None
         self.prev_points = None
+        self.prev_track_ids = None
+        self.next_track_id = 0
+        self.orb = cv2.ORB_create()
 
     def reset(self) -> None:
         """
@@ -88,6 +93,8 @@ class FeatureTracker:
         """
         self.prev_gray = None
         self.prev_points = None
+        self.prev_track_ids = None
+        self.next_track_id = 0
 
     def process(self, image: np.ndarray) -> FeatureTrackingResult:
         """
@@ -102,14 +109,17 @@ class FeatureTracker:
             detected = self.detect_features(gray)
             self.prev_gray = gray
             self.prev_points = detected
+            self.prev_track_ids = self._new_track_ids(len(detected))
 
             return _empty_result(
                 active_points=as_points_xy(detected),
+                active_ids=self.prev_track_ids,
                 redetected=True,
                 detected_count=len(detected),
             )
 
         prev_points = self.prev_points
+        prev_track_ids = self.prev_track_ids
 
         curr_points, status, _ = cv2.calcOpticalFlowPyrLK(
             self.prev_gray,
@@ -138,16 +148,20 @@ class FeatureTracker:
             tracked_prev = as_points_xy(prev_points[status_mask])
             tracked_curr = as_points_xy(curr_points[status_mask])
 
+        tracked_ids = prev_track_ids[status_mask]
+
         redetected = False
         detected_count = 0
 
         if len(tracked_curr) < self.min_features:
             new_points = self.detect_features(gray)
             self.prev_points = new_points
+            self.prev_track_ids = self._new_track_ids(len(new_points))
             redetected = True
             detected_count = len(new_points)
         else:
             self.prev_points = tracked_curr.reshape(-1, 1, 2).astype(np.float32)
+            self.prev_track_ids = tracked_ids
 
         self.prev_gray = gray
 
@@ -155,8 +169,10 @@ class FeatureTracker:
             prev_points=tracked_prev,
             curr_points=tracked_curr,
             status_mask=status_mask,
+            tracked_ids=tracked_ids,
             track_count=len(tracked_curr),
             active_points=as_points_xy(self.prev_points),
+            active_ids=self.prev_track_ids.copy(),
             active_count=len(self.prev_points),
             redetected=redetected,
             detected_count=detected_count,
@@ -173,6 +189,36 @@ class FeatureTracker:
             return self._detect_gftt(gray)
 
         raise ValueError(f"Unsupported detector: {self.detector}")
+
+    def describe(self, image: np.ndarray, points: np.ndarray) -> tuple:
+        """Compute ORB descriptors and return their input point indices."""
+        points = as_points_xy(points)
+        if len(points) == 0:
+            return np.empty((0, 32), dtype=np.uint8), np.empty(0, dtype=np.int64)
+
+        keypoints = [
+            cv2.KeyPoint(float(x), float(y), 31.0, -1.0, 0.0, 0, index)
+            for index, (x, y) in enumerate(points)
+        ]
+        keypoints, descriptors = self.orb.compute(to_grayscale(image), keypoints)
+
+        if descriptors is None:
+            return np.empty((0, 32), dtype=np.uint8), np.empty(0, dtype=np.int64)
+
+        indices = np.asarray(
+            [keypoint.class_id for keypoint in keypoints],
+            dtype=np.int64,
+        )
+        return descriptors, indices
+
+    def _new_track_ids(self, count: int) -> np.ndarray:
+        track_ids = np.arange(
+            self.next_track_id,
+            self.next_track_id + int(count),
+            dtype=np.int64,
+        )
+        self.next_track_id += int(count)
+        return track_ids
 
     def _detect_fast(self, gray: np.ndarray) -> np.ndarray:
         detector = cv2.FastFeatureDetector_create(
@@ -251,6 +297,7 @@ def _empty_lk_points() -> np.ndarray:
 
 def _empty_result(
     active_points: np.ndarray,
+    active_ids: np.ndarray,
     redetected: bool,
     detected_count: int,
 ) -> FeatureTrackingResult:
@@ -258,8 +305,10 @@ def _empty_result(
         prev_points=empty_points(2),
         curr_points=empty_points(2),
         status_mask=np.empty(0, dtype=np.bool_),
+        tracked_ids=np.empty(0, dtype=np.int64),
         track_count=0,
         active_points=active_points,
+        active_ids=active_ids.copy(),
         active_count=len(active_points),
         redetected=redetected,
         detected_count=detected_count,

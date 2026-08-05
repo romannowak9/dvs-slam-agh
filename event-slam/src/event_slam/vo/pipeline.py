@@ -27,6 +27,8 @@ class EvSlamStereoVOSummary:
     motion_compensation_failed: int = 0
     imu_prior_available_frames: int = 0
     imu_rejected_steps: int = 0
+    keyframe_count: int = 0
+    landmark_count: int = 0
 
 
 class EvSlamStereoVOPipeline:
@@ -171,6 +173,8 @@ class EvSlamStereoVOPipeline:
             motion_compensation_failed=self.motion_compensation_failed,
             imu_prior_available_frames=self.imu_prior_available_frames,
             imu_rejected_steps=self.imu_rejected_steps,
+            keyframe_count=vo_summary.keyframe_count,
+            landmark_count=vo_summary.landmark_count,
         )
 
     def _compensate_window(self, window: StereoEventWindow) -> StereoEventWindow:

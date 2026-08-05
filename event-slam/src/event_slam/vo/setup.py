@@ -28,6 +28,7 @@ def create_pipeline(config: dict) -> EvSlamStereoVOPipeline:
     feature_tracker_cfg = config.get("feature_tracker", {})
     stereo_depth_cfg = config.get("stereo_depth", {})
     pnp_cfg = config.get("pnp", {})
+    slam_cfg = config.get("slam", {})
     velocity_cfg = config.get("velocity", {})
 
     calibration = load_stereo_calibration(dataset_cfg["camera_yaml"])
@@ -116,6 +117,7 @@ def create_pipeline(config: dict) -> EvSlamStereoVOPipeline:
         imu_rotation_prior_reject_bad_pnp=bool(
             rotation_prior_cfg.get("reject_bad_pnp", False)
         ),
+        slam_params=slam_cfg,
     )
 
     imu_enabled = bool(imu_cfg.get("enabled", False))
