@@ -43,7 +43,6 @@ rectification:
 
 feature_tracker:
   detector: gftt  # or fast
-  min_features: 250
   max_features: 1000
   fast_threshold: 25
   forward_backward_check: false
@@ -78,6 +77,9 @@ slam:
   rotation_deg: 10.0
   tracked_landmark_ratio: 0.6
   max_landmark_depth: 10.0
+  local_keyframes: 5
+  descriptor_ratio: 0.75
+  reprojection_gate_px: 15.0
 
 velocity:
   enabled: true
@@ -86,7 +88,7 @@ velocity:
   smoothing_poly_order: 2
 
 output:
-  output_dir: outputs/evslam_vo_seq007_imu
+  output_dir: outputs/evslam_slam_seq007
   trajectory_csv: trajectory.csv
   result_txt: result_seq007.txt
   keyframes_csv: keyframes.csv
