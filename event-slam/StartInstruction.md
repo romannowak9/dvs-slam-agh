@@ -11,9 +11,12 @@ xhost +local:docker
 
 Running first time:
 ```bash
+cd /mnt/docker_disk/home/mgr/dvs-slam-agh
+
 docker run -it \
   --name event-slam-dev \
   --net=host \
+  --security-opt seccomp=unconfined \
   --env="DISPLAY=$DISPLAY" \
   --env="QT_X11_NO_MITSHM=1" \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
@@ -39,8 +42,6 @@ To open second terminal with the same container:
 docker exec -it event-slam-dev bash
 ```
 
-In VSCode attach to a running container and then open /workspace directory
-
 ## Quickstart
 
 ```bash
@@ -52,11 +53,12 @@ docker start -ai event-slam-dev
 Attach VSCode to running container and source:
 ```bash
 source /opt/ros/noetic/setup.bash
+cd /workspace/event-slam
 ```
 
 # Trajectory estimation
 
 ```bash
 python3 scripts/run_evslam_vo.py \
-  --config configs/evslam_seq001.yaml
+  --config configs/evslam_seq007_test_imu.yaml
 ```

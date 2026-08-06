@@ -36,11 +36,11 @@ def save_outputs(pipeline, config: dict, interrupted: bool = False) -> tuple:
         output_dir,
         output_cfg.get("trajectory_csv", "trajectory.csv"),
     )
-    write_vo_csv(pipeline.vo.results, trajectory_path)
+    write_vo_csv(pipeline.slam.results, trajectory_path)
 
     keyframes_path = None
     landmarks_path = None
-    sparse_map = getattr(pipeline.vo, "map", None)
+    sparse_map = pipeline.slam.map
     if sparse_map is not None:
         keyframes_path = _resolve_output_path(
             output_dir,
@@ -109,7 +109,9 @@ def write_vo_csv(results, path) -> None:
             "reprojection_error_mean,reprojection_error_median,"
             "pnp_rotation_step_deg,imu_rotation_step_deg,"
             "pnp_imu_rotation_error_deg,imu_rotation_consistent,"
-            "imu_rejected,message\n"
+            "imu_rejected,message,pose_source,map_point_count,"
+            "map_inlier_count,local_landmark_count,"
+            "map_descriptor_match_count,map_message,new_feature_count\n"
         )
 
         for result in results:
@@ -131,7 +133,14 @@ def write_vo_csv(results, path) -> None:
                 f"{result.pnp_imu_rotation_error_deg:.9f},"
                 f"{int(result.imu_rotation_consistent)},"
                 f"{int(result.imu_rejected)},"
-                f"{_csv_safe(result.message)}\n"
+                f"{_csv_safe(result.message)},"
+                f"{result.pose_source},"
+                f"{result.map_point_count},"
+                f"{result.map_inlier_count},"
+                f"{result.local_landmark_count},"
+                f"{result.map_descriptor_match_count},"
+                f"{_csv_safe(result.map_message)},"
+                f"{result.new_feature_count}\n"
             )
 
 

@@ -107,6 +107,16 @@ def make_transform(R: np.ndarray, t: np.ndarray) -> np.ndarray:
     return T
 
 
+def orthonormalize_rotation(R: np.ndarray) -> np.ndarray:
+    """Project a nearly rotational matrix onto SO(3)."""
+    U, _, Vt = np.linalg.svd(as_float_array(R, (3, 3), "R"))
+    R_normalized = U @ Vt
+    if np.linalg.det(R_normalized) < 0.0:
+        U[:, -1] *= -1.0
+        R_normalized = U @ Vt
+    return R_normalized
+
+
 def invert_transform(T: np.ndarray) -> np.ndarray:
     """
     Invert an SE(3) homogeneous transform.

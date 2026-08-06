@@ -31,7 +31,6 @@ class FeatureTrackingResult:
     active_ids: np.ndarray
     active_count: int
 
-    redetected: bool
     detected_count: int
 
 
@@ -43,13 +42,12 @@ class FeatureTracker:
         1. detect features in the first frame,
         2. track them with calcOpticalFlowPyrLK,
         3. reject invalid tracks,
-        4. redetect features when too few tracks remain.
+        4. replenish missing features without discarding surviving tracks.
     """
 
     def __init__(
         self,
         detector: FeatureDetectorMode | str = FeatureDetectorMode.FAST,
-        min_features: int = 250,
         max_features: int = 1000,
         fast_threshold: int = 25,
         gftt_quality_level: float = 0.01,
@@ -61,7 +59,6 @@ class FeatureTracker:
     ) -> None:
 
         self.detector = FeatureDetectorMode(detector)
-        self.min_features = int(min_features)
         self.max_features = int(max_features)
         self.fast_threshold = int(fast_threshold)
 
@@ -105,7 +102,11 @@ class FeatureTracker:
         """
         gray = to_grayscale(image)
 
-        if self.prev_gray is None or self.prev_points is None or len(self.prev_points) == 0:
+        if (
+            self.prev_gray is None
+            or self.prev_points is None
+            or len(self.prev_points) == 0
+        ):
             detected = self.detect_features(gray)
             self.prev_gray = gray
             self.prev_points = detected
@@ -114,7 +115,6 @@ class FeatureTracker:
             return _empty_result(
                 active_points=as_points_xy(detected),
                 active_ids=self.prev_track_ids,
-                redetected=True,
                 detected_count=len(detected),
             )
 
@@ -150,20 +150,23 @@ class FeatureTracker:
 
         tracked_ids = prev_track_ids[status_mask]
 
-        redetected = False
-        detected_count = 0
-
-        if len(tracked_curr) < self.min_features:
-            new_points = self.detect_features(gray)
-            self.prev_points = new_points
-            self.prev_track_ids = self._new_track_ids(len(new_points))
-            redetected = True
-            detected_count = len(new_points)
-        else:
-            self.prev_points = tracked_curr.reshape(-1, 1, 2).astype(np.float32)
-            self.prev_track_ids = tracked_ids
+        new_points = self.detect_features(
+            gray,
+            mask=self._detection_mask(gray.shape, tracked_curr),
+            max_count=self.max_features - len(tracked_curr),
+        )
+        detected_count = len(new_points)
+        active_points = np.concatenate(
+            (tracked_curr, as_points_xy(new_points)),
+            axis=0,
+        )
+        active_ids = np.concatenate(
+            (tracked_ids, self._new_track_ids(detected_count)),
+        )
 
         self.prev_gray = gray
+        self.prev_points = active_points.reshape(-1, 1, 2).astype(np.float32)
+        self.prev_track_ids = active_ids
 
         return FeatureTrackingResult(
             prev_points=tracked_prev,
@@ -174,19 +177,29 @@ class FeatureTracker:
             active_points=as_points_xy(self.prev_points),
             active_ids=self.prev_track_ids.copy(),
             active_count=len(self.prev_points),
-            redetected=redetected,
             detected_count=detected_count,
         )
 
-    def detect_features(self, gray: np.ndarray) -> np.ndarray:
+    def detect_features(
+        self,
+        gray: np.ndarray,
+        mask: np.ndarray = None,
+        max_count: int = None,
+    ) -> np.ndarray:
         """
         Detect feature points in a grayscale image.
         """
+        max_count = (
+            self.max_features if max_count is None else max(0, int(max_count))
+        )
+        if max_count == 0:
+            return _empty_lk_points()
+
         if self.detector == FeatureDetectorMode.FAST:
-            return self._detect_fast(gray)
+            return self._detect_fast(gray, mask, max_count)
 
         if self.detector == FeatureDetectorMode.GFTT:
-            return self._detect_gftt(gray)
+            return self._detect_gftt(gray, mask, max_count)
 
         raise ValueError(f"Unsupported detector: {self.detector}")
 
@@ -220,30 +233,41 @@ class FeatureTracker:
         self.next_track_id += int(count)
         return track_ids
 
-    def _detect_fast(self, gray: np.ndarray) -> np.ndarray:
+    def _detect_fast(
+        self,
+        gray: np.ndarray,
+        mask: np.ndarray,
+        max_count: int,
+    ) -> np.ndarray:
         detector = cv2.FastFeatureDetector_create(
             threshold=self.fast_threshold,
             nonmaxSuppression=True,
         )
 
-        keypoints = detector.detect(gray, None)
+        keypoints = detector.detect(gray, mask)
 
         if len(keypoints) == 0:
             return _empty_lk_points()
 
         keypoints = sorted(keypoints, key=lambda kp: kp.response, reverse=True)
-        keypoints = keypoints[: self.max_features]
+        keypoints = keypoints[:max_count]
 
         points = cv2.KeyPoint_convert(keypoints)
 
         return points.reshape(-1, 1, 2).astype(np.float32)
 
-    def _detect_gftt(self, gray: np.ndarray) -> np.ndarray:
+    def _detect_gftt(
+        self,
+        gray: np.ndarray,
+        mask: np.ndarray,
+        max_count: int,
+    ) -> np.ndarray:
         points = cv2.goodFeaturesToTrack(
             gray,
-            maxCorners=self.max_features,
+            maxCorners=max_count,
             qualityLevel=self.gftt_quality_level,
             minDistance=self.gftt_min_distance,
+            mask=mask,
             blockSize=7,
         )
 
@@ -251,6 +275,17 @@ class FeatureTracker:
             return _empty_lk_points()
 
         return points.astype(np.float32)
+
+    def _detection_mask(
+        self,
+        image_shape: tuple,
+        existing_points: np.ndarray,
+    ) -> np.ndarray:
+        mask = np.full(image_shape[:2], 255, dtype=np.uint8)
+        radius = max(1, int(round(self.gftt_min_distance)))
+        for x, y in as_points_xy(existing_points):
+            cv2.circle(mask, (int(round(x)), int(round(y))), radius, 0, -1)
+        return mask
 
     def _forward_backward_mask(
         self,
@@ -290,15 +325,14 @@ class FeatureTracker:
             & (xy[:, 1] < height)
         )
 
+
 def _empty_lk_points() -> np.ndarray:
     return np.empty((0, 1, 2), dtype=np.float32)
-
 
 
 def _empty_result(
     active_points: np.ndarray,
     active_ids: np.ndarray,
-    redetected: bool,
     detected_count: int,
 ) -> FeatureTrackingResult:
     return FeatureTrackingResult(
@@ -310,6 +344,5 @@ def _empty_result(
         active_points=active_points,
         active_ids=active_ids.copy(),
         active_count=len(active_points),
-        redetected=redetected,
         detected_count=detected_count,
     )
