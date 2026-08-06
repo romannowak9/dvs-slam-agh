@@ -1,4 +1,4 @@
-"""Sparse SLAM map structures."""
+"""Sparse stereo SLAM components."""
 
 from event_slam.slam.map import Keyframe, Landmark, SparseMap
 

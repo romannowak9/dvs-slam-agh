@@ -11,8 +11,8 @@ from event_slam.debug.visualization import print_vo_frame
 from event_slam.events.event_aggregator import EventFrameAggregator
 from event_slam.events.event_filter import StereoBackgroundActivityFilter
 from event_slam.events.event_window import StereoEventWindowBuilder
-from event_slam.vo.pipeline import EvSlamStereoVOPipeline
-from event_slam.vo.stereo_pnp_vo import StereoPnPVO
+from event_slam.pipeline import EvSlamStereoVOPipeline
+from event_slam.slam.stereo_pnp import StereoPnPSLAM
 
 
 def create_pipeline(config: dict) -> EvSlamStereoVOPipeline:
@@ -75,14 +75,13 @@ def create_pipeline(config: dict) -> EvSlamStereoVOPipeline:
             "R_output_from_pnp_camera",
         )
 
-    vo = StereoPnPVO(
+    slam = StereoPnPSLAM(
         K=rectifier.K_left_rectified,
         P1=rectifier.P1,
         P2=rectifier.P2,
         R_rect_left_from_left=rectifier.R1,
         feature_tracker_params={
             "detector": feature_tracker_cfg.get("detector", "fast"),
-            "min_features": int(feature_tracker_cfg.get("min_features", 250)),
             "max_features": int(feature_tracker_cfg.get("max_features", 1000)),
             "fast_threshold": int(feature_tracker_cfg.get("fast_threshold", 25)),
             "use_forward_backward_check": bool(
@@ -158,7 +157,7 @@ def create_pipeline(config: dict) -> EvSlamStereoVOPipeline:
         window_builder=window_builder,
         aggregator=aggregator,
         rectifier=rectifier,
-        vo=vo,
+        slam=slam,
         calibration=calibration,
         background_filter=background_filter,
         imu_timestamps=imu_timestamps,

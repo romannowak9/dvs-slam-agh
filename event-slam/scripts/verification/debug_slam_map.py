@@ -31,7 +31,8 @@ from event_slam.debug.visualization import (
     save_image,
     show_image,
 )
-from event_slam.vo.setup import create_pipeline
+from event_slam.io.result_io import save_outputs
+from event_slam.setup import create_pipeline
 
 
 class SlamMapVisualizer:
@@ -57,7 +58,7 @@ class SlamMapVisualizer:
         self.keyframe_dir.mkdir(parents=True, exist_ok=True)
 
     def __call__(self, frame_index, window, result, motion_compensation) -> None:
-        sparse_map = self.pipeline.vo.map
+        sparse_map = self.pipeline.slam.map
         if sparse_map is None or len(sparse_map.keyframes) <= self.saved_keyframe_count:
             return
 
@@ -79,7 +80,7 @@ class SlamMapVisualizer:
 
         if self.display and not show_image("debug_slam_map", image, self.delay_ms):
             self.stop_requested = True
-            self.pipeline.num_frames = len(self.pipeline.vo.results)
+            self.pipeline.num_frames = len(self.pipeline.slam.results)
 
     @staticmethod
     def _draw_keyframe(image_gray, keyframe, sparse_map) -> np.ndarray:
@@ -104,7 +105,7 @@ class SlamMapVisualizer:
         return image
 
     def save_map_plot(self) -> Path:
-        sparse_map = self.pipeline.vo.map
+        sparse_map = self.pipeline.slam.map
         all_landmarks = list(sparse_map.landmarks.values())
         landmarks = [
             item
@@ -121,8 +122,8 @@ class SlamMapVisualizer:
         axes = figure.add_subplot(111, projection="3d")
         scatter = axes.scatter(
             positions_W[:, 0],
-            positions_W[:, 1],
             positions_W[:, 2],
+            positions_W[:, 1],
             c=observations,
             cmap="viridis",
             s=4,
@@ -131,15 +132,16 @@ class SlamMapVisualizer:
         )
         axes.plot(
             camera_positions[:, 0],
-            camera_positions[:, 1],
             camera_positions[:, 2],
+            camera_positions[:, 1],
             "r.-",
             linewidth=1.5,
             label="keyframes",
         )
-        axes.set_xlabel("world X [m]")
-        axes.set_ylabel("world Y [m]")
-        axes.set_zlabel("world Z [m]")
+        axes.set_xlabel("world X - right [m]")
+        axes.set_ylabel("world Z - forward [m]")
+        axes.set_zlabel("world Y - down [m]")
+        axes.invert_zaxis()
         axes.set_title(
             f"Sparse map: {len(keyframes)} keyframes, "
             f"{len(landmarks)}/{len(all_landmarks)} landmarks within "
@@ -150,6 +152,59 @@ class SlamMapVisualizer:
         figure.tight_layout()
 
         path = self.output_dir / "map_3d.png"
+        figure.savefig(path, dpi=160)
+        plt.close(figure)
+        return path
+
+    def save_tracking_plot(self) -> Path:
+        """Plot map correspondences and the selected pose source per frame."""
+        results = self.pipeline.slam.results
+        frames = np.arange(len(results))
+        sources = {"none": 0, "vo_fallback": 1, "map": 2, "initialization": 3}
+
+        figure, axes = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
+        axes[0].plot(frames, [r.track_count for r in results], label="tracked features")
+        axes[0].plot(
+            frames,
+            [r.track_count + r.new_feature_count for r in results],
+            label="active features",
+        )
+        axes[0].plot(frames, [r.map_point_count for r in results], label="map points")
+        axes[0].plot(frames, [r.map_inlier_count for r in results], label="map inliers")
+        axes[0].plot(frames, [r.pnp_inlier_count for r in results], label="used inliers")
+        axes[0].set_ylabel("count")
+        axes[0].legend()
+        axes[0].grid(alpha=0.25)
+
+        axes[1].scatter(
+            frames,
+            [sources[r.pose_source] for r in results],
+            c=[sources[r.pose_source] for r in results],
+            cmap="viridis",
+            s=18,
+        )
+        descriptor_frames = [
+            index
+            for index, result in enumerate(results)
+            if result.map_descriptor_match_count > 0
+        ]
+        axes[1].scatter(
+            descriptor_frames,
+            [sources[results[index].pose_source] for index in descriptor_frames],
+            marker="x",
+            s=60,
+            color="red",
+            label="ORB recovery",
+        )
+        axes[1].set_yticks(list(sources.values()))
+        axes[1].set_yticklabels(list(sources))
+        axes[1].set_xlabel("frame")
+        axes[1].set_ylabel("pose source")
+        axes[1].grid(alpha=0.25)
+        axes[1].legend()
+        figure.tight_layout()
+
+        path = self.output_dir / "tracking_diagnostics.png"
         figure.savefig(path, dpi=160)
         plt.close(figure)
         return path
@@ -165,6 +220,7 @@ def main() -> None:
 
     if args.num_frames is not None:
         config.setdefault("processing", {})["num_frames"] = args.num_frames
+    config.setdefault("output", {})["output_dir"] = str(args.output_dir)
 
     pipeline = create_pipeline(config)
     visualizer = SlamMapVisualizer(
@@ -180,16 +236,21 @@ def main() -> None:
     if args.display:
         cv2.destroyAllWindows()
 
-    if not pipeline.vo.map.keyframes:
+    if not pipeline.slam.map.keyframes:
         print("No keyframes were created.")
         return
 
     map_path = visualizer.save_map_plot()
+    tracking_path = visualizer.save_tracking_plot()
+    save_outputs(pipeline, config)
+    with (args.output_dir / "run_config.yaml").open("w", encoding="utf-8") as file:
+        yaml.safe_dump(config, file, sort_keys=False)
     print()
     print(f"processed_frames: {summary.processed_frames}")
     print(f"keyframes: {summary.keyframe_count}")
     print(f"landmarks: {summary.landmark_count}")
     print(f"map_plot: {map_path}")
+    print(f"tracking_plot: {tracking_path}")
 
 
 def parse_args() -> argparse.Namespace:

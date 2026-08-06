@@ -17,7 +17,7 @@ if SRC_PATH.exists():
 
 
 from event_slam.io.result_io import save_outputs
-from event_slam.vo.setup import create_pipeline
+from event_slam.setup import create_pipeline
 
 
 def main() -> None:

@@ -33,7 +33,7 @@ from event_slam.events.event_filter import StereoBackgroundActivityFilter
 from event_slam.events.event_window import StereoEventWindowBuilder
 from event_slam.io.result_io import write_vo_csv
 from event_slam.vo.feature_tracker import FeatureDetectorMode
-from event_slam.vo.stereo_pnp_vo import StereoPnPVO
+from event_slam.slam.stereo_pnp import StereoPnPSLAM
 
 from event_slam.debug.visualization import (
     colorize_event_frame,
@@ -84,13 +84,12 @@ def main() -> None:
         interpolation="nearest",
     )
 
-    vo = StereoPnPVO(
+    vo = StereoPnPSLAM(
         K=rectifier.K_left_rectified,
         P1=rectifier.P1,
         P2=rectifier.P2,
         feature_tracker_params={
             "detector": args.detector,
-            "min_features": args.min_features,
             "max_features": args.max_features,
             "fast_threshold": args.fast_threshold,
             "use_forward_backward_check": args.forward_backward_check,
@@ -225,7 +224,6 @@ def parse_args() -> argparse.Namespace:
         choices=[mode.value for mode in FeatureDetectorMode],
     )
 
-    parser.add_argument("--min-features", default=250, type=int)
     parser.add_argument("--max-features", default=1000, type=int)
     parser.add_argument("--fast-threshold", default=25, type=int)
 

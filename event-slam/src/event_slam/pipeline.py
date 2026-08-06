@@ -44,7 +44,7 @@ class EvSlamStereoVOPipeline:
         window_builder,
         aggregator,
         rectifier,
-        vo,
+        slam,
         calibration,
         background_filter=None,
         imu_timestamps=None,
@@ -61,7 +61,7 @@ class EvSlamStereoVOPipeline:
         self.window_builder = window_builder
         self.aggregator = aggregator
         self.rectifier = rectifier
-        self.vo = vo
+        self.slam = slam
         self.calibration = calibration
         self.background_filter = background_filter
 
@@ -89,13 +89,13 @@ class EvSlamStereoVOPipeline:
     @property
     def trajectory(self):
         """
-        Return the trajectory owned by StereoPnPVO.
+        Return the trajectory owned by StereoPnPSLAM.
         """
-        return self.vo.trajectory
+        return self.slam.trajectory
 
     def run(self) -> EvSlamStereoVOSummary:
         for frame_index, window in enumerate(self.window_builder.iter_windows()):
-            if self.num_frames > 0 and len(self.vo.results) >= self.num_frames:
+            if self.num_frames > 0 and len(self.slam.results) >= self.num_frames:
                 break
 
             self.process_window(window, frame_index)
@@ -118,7 +118,7 @@ class EvSlamStereoVOPipeline:
         )
 
         timestamp = stereo_frame.timestamp
-        result = self.vo.process(
+        result = self.slam.process(
             left_rectified=left_rectified,
             right_rectified=right_rectified,
             timestamp=timestamp,
@@ -155,7 +155,7 @@ class EvSlamStereoVOPipeline:
         """
         Return summary statistics for the current run.
         """
-        vo_summary = self.vo.get_summary()
+        slam_summary = self.slam.get_summary()
 
         if self.velocity_trajectory is None:
             velocity_samples = 0
@@ -163,18 +163,18 @@ class EvSlamStereoVOPipeline:
             velocity_samples = len(self.velocity_trajectory)
 
         return EvSlamStereoVOSummary(
-            processed_frames=vo_summary.processed_frames,
-            successful_steps=vo_summary.successful_steps,
-            failed_frames=vo_summary.failed_frames,
-            median_inliers=vo_summary.median_inliers,
-            final_position=vo_summary.final_position,
+            processed_frames=slam_summary.processed_frames,
+            successful_steps=slam_summary.successful_steps,
+            failed_frames=slam_summary.failed_frames,
+            median_inliers=slam_summary.median_inliers,
+            final_position=slam_summary.final_position,
             velocity_samples=velocity_samples,
             motion_compensated_frames=self.motion_compensated_frames,
             motion_compensation_failed=self.motion_compensation_failed,
             imu_prior_available_frames=self.imu_prior_available_frames,
             imu_rejected_steps=self.imu_rejected_steps,
-            keyframe_count=vo_summary.keyframe_count,
-            landmark_count=vo_summary.landmark_count,
+            keyframe_count=slam_summary.keyframe_count,
+            landmark_count=slam_summary.landmark_count,
         )
 
     def _compensate_window(self, window: StereoEventWindow) -> StereoEventWindow:

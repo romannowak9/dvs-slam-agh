@@ -1,0 +1,482 @@
+from __future__ import annotations
+
+import cv2
+import numpy as np
+
+from event_slam.core.geometry import (
+    Pose,
+    as_float_array,
+    empty_points,
+    invert_transform,
+    make_transform,
+    orthonormalize_rotation,
+)
+from event_slam.core.imu import rotation_angle_deg
+from event_slam.core.trajectory import Trajectory
+from event_slam.slam.local_matching import LocalMapMatcher, MapCorrespondences
+from event_slam.slam.map import SparseMap
+from event_slam.slam.results import StereoPnPSLAMResult, StereoPnPSLAMSummary
+from event_slam.vo.feature_tracker import FeatureTracker
+from event_slam.vo.pnp import PnPSolution, PnPSolver
+from event_slam.vo.stereo_depth import StereoDepthEstimator
+
+class StereoPnPSLAM:
+    """
+    Stereo pose estimator with a persistent sparse map.
+
+    The current pose is estimated first from world landmarks and current image
+    points. The original frame-to-frame stereo PnP remains the fallback while
+    the camera explores an unmapped area.
+
+    Convention:
+        T_A_B maps points from frame B to frame A.
+
+    Both PnP paths are converted to the same relative transform T_Ck_Cprev.
+    Since poses are stored as T_W_C, the integration is:
+        T_W_Ck = T_W_Cprev @ inverse(T_Ck_Cprev)
+    """
+
+    def __init__(
+        self,
+        K: np.ndarray,
+        P1: np.ndarray,
+        P2: np.ndarray,
+        R_rect_left_from_left=None,
+        feature_tracker_params=None,
+        stereo_depth_params=None,
+        min_pnp_points: int = 20,
+        min_pnp_inliers: int = 30,
+        min_pnp_inlier_ratio: float = 0.15,
+        max_pnp_reprojection_median: float = 3.0,
+        max_translation_step: float = 0.5,
+        max_rotation_step_deg: float = 15.0,
+        pnp_reprojection_error: float = 3.0,
+        pnp_confidence: float = 0.999,
+        pnp_iterations: int = 100,
+        pnp_flags: int = cv2.SOLVEPNP_ITERATIVE,
+        R_output_from_pnp_camera=None,
+        imu_rotation_prior_max_error_deg: float = 3.0,
+        imu_rotation_prior_reject_bad_pnp: bool = False,
+        slam_params=None,
+    ) -> None:
+        self.K = as_float_array(K, (3, 3), "K")
+        self.P1 = as_float_array(P1, (3, 4), "P1")
+        self.P2 = as_float_array(P2, (3, 4), "P2")
+
+        if R_rect_left_from_left is None:
+            self.R_rect_left_from_left = np.eye(3, dtype=np.float64)
+        else:
+            self.R_rect_left_from_left = as_float_array(
+                R_rect_left_from_left, (3, 3), "R_rect_left_from_left"
+            )
+
+        self.R_left_from_rect_left = self.R_rect_left_from_left.T
+
+        if R_output_from_pnp_camera is None:
+            self.R_output_from_pnp_camera = np.eye(3, dtype=np.float64)
+        else:
+            self.R_output_from_pnp_camera = as_float_array(
+                R_output_from_pnp_camera, (3, 3), "R_output_from_pnp_camera"
+            )
+
+        feature_tracker_params = feature_tracker_params or {}
+        stereo_depth_params = stereo_depth_params or {}
+
+        self.tracker = FeatureTracker(**feature_tracker_params)
+
+        self.depth_estimator = StereoDepthEstimator(
+            P1=self.P1,
+            P2=self.P2,
+            **stereo_depth_params,
+        )
+        self.pnp = PnPSolver(
+            K=self.K,
+            min_points=min_pnp_points,
+            min_inliers=min_pnp_inliers,
+            min_inlier_ratio=min_pnp_inlier_ratio,
+            max_reprojection_median=max_pnp_reprojection_median,
+            max_translation_step=max_translation_step,
+            max_rotation_step_deg=max_rotation_step_deg,
+            reprojection_error=pnp_reprojection_error,
+            confidence=pnp_confidence,
+            iterations=pnp_iterations,
+            flags=pnp_flags,
+            imu_max_error_deg=imu_rotation_prior_max_error_deg,
+            reject_imu_inconsistent=imu_rotation_prior_reject_bad_pnp,
+        )
+
+        slam_params = slam_params or {}
+        self.slam_enabled = bool(slam_params.get("enabled", False))
+        self.keyframe_min_frame_gap = int(slam_params.get("min_frame_gap", 5))
+        self.keyframe_translation_depth_ratio = float(
+            slam_params.get("translation_depth_ratio", 0.15)
+        )
+        self.keyframe_rotation_deg = float(slam_params.get("rotation_deg", 10.0))
+        self.keyframe_tracked_landmark_ratio = float(
+            slam_params.get("tracked_landmark_ratio", 0.6)
+        )
+        self.max_landmark_depth = float(
+            slam_params.get("max_landmark_depth", 10.0)
+        )
+        self.local_matcher = LocalMapMatcher(
+            K=self.K,
+            descriptor_extractor=self.tracker.describe,
+            keyframe_count=slam_params.get("local_keyframes", 5),
+            descriptor_ratio=slam_params.get("descriptor_ratio", 0.75),
+            reprojection_gate_px=slam_params.get("reprojection_gate_px", 15.0),
+        )
+
+        self.R_C_Crect = (
+            self.R_output_from_pnp_camera @ self.R_left_from_rect_left
+        )
+        self.T_C_Crect = make_transform(self.R_C_Crect, np.zeros(3))
+        self.T_Crect_C = invert_transform(self.T_C_Crect)
+
+        self.reset()
+
+    def reset(self) -> None:
+        """Reset tracking, pose, trajectory and map state."""
+        self.tracker.reset()
+
+        self.initialized = False
+        self.T_W_Cleft = np.eye(4, dtype=np.float64)
+
+        self.prev_points_3d_rect = empty_points(3, dtype=np.float64)
+
+        self.trajectory = Trajectory()
+        self.results = []
+        self.map = SparseMap() if self.slam_enabled else None
+
+    def get_summary(self) -> StereoPnPSLAMSummary:
+        inliers = [
+            result.pnp_inlier_count
+            for result in self.results
+            if result.pnp_inlier_count > 0
+        ]
+        median_inliers = float(np.median(inliers)) if inliers else np.nan
+        final_position = (
+            self.results[-1].T_W_Cleft[:3, 3].copy()
+            if self.results
+            else np.zeros(3, dtype=np.float64)
+        )
+
+        return StereoPnPSLAMSummary(
+            processed_frames=len(self.results),
+            successful_steps=sum(result.success for result in self.results),
+            failed_frames=sum(not result.success for result in self.results),
+            median_inliers=median_inliers,
+            final_position=final_position,
+            keyframe_count=len(self.map.keyframes) if self.map is not None else 0,
+            landmark_count=len(self.map.landmarks) if self.map is not None else 0,
+        )
+
+    def process(
+        self,
+        left_rectified: np.ndarray,
+        right_rectified: np.ndarray,
+        timestamp: float,
+        imu_rotation_prior: np.ndarray = None,
+    ) -> StereoPnPSLAMResult:
+        """
+        Process one rectified stereo pair.
+        """
+        tracking_result = self.tracker.process(left_rectified)
+
+        if not self.initialized:
+            points_3d, depth_count = self._compute_depth_for_active_points(
+                left_rectified=left_rectified,
+                right_rectified=right_rectified,
+                active_points=tracking_result.active_points,
+            )
+
+            self.prev_points_3d_rect = points_3d
+            self.initialized = True
+
+            result = StereoPnPSLAMResult(
+                timestamp=float(timestamp),
+                success=True,
+                initialized=True,
+                T_W_Cleft=self.T_W_Cleft.copy(),
+                pose_source="initialization",
+                new_feature_count=tracking_result.detected_count,
+                reinitialized=True,
+                depth_count=depth_count,
+                message="initialized",
+            )
+
+            self._update_map(left_rectified, tracking_result, result)
+            self._append_result(result)
+            return result
+
+        result = self._estimate_current_pose(
+            left_rectified=left_rectified,
+            right_rectified=right_rectified,
+            timestamp=float(timestamp),
+            tracking_result=tracking_result,
+            imu_rotation_prior=imu_rotation_prior,
+        )
+
+        self._update_map(left_rectified, tracking_result, result)
+        self._append_result(result)
+        return result
+
+    def _update_map(self, left_rectified, tracking_result, result) -> None:
+        if self.map is None or not result.success:
+            return
+
+        frame_index = len(self.results)
+        if not self._should_create_keyframe(frame_index, tracking_result.active_ids):
+            return
+
+        descriptors, indices = self.tracker.describe(
+            left_rectified,
+            tracking_result.active_points,
+        )
+        if len(indices) == 0:
+            return
+
+        points_3d_rect = self.prev_points_3d_rect[indices]
+        valid = np.isfinite(points_3d_rect).all(axis=1)
+        valid[valid] = (
+            (points_3d_rect[valid, 2] > 0.0)
+            & (points_3d_rect[valid, 2] <= self.max_landmark_depth)
+        )
+        if not np.any(valid):
+            return
+
+        self.map.add_keyframe(
+            frame_index=frame_index,
+            timestamp=result.timestamp,
+            T_W_C=result.T_W_Cleft,
+            points_2d=tracking_result.active_points[indices][valid],
+            points_C=self._rectified_points_to_output_camera(points_3d_rect[valid]),
+            descriptors=descriptors[valid],
+            track_ids=tracking_result.active_ids[indices][valid],
+        )
+        self.map.prune_landmarks(self.local_matcher.keyframe_count)
+
+    def _should_create_keyframe(
+        self,
+        frame_index: int,
+        active_track_ids: np.ndarray,
+    ) -> bool:
+        last_keyframe = self.map.last_keyframe
+        if last_keyframe is None:
+            return True
+
+        if frame_index - last_keyframe.frame_index < self.keyframe_min_frame_gap:
+            return False
+
+        T_Clast_C = invert_transform(last_keyframe.T_W_C) @ self.T_W_Cleft
+        translation = float(np.linalg.norm(T_Clast_C[:3, 3]))
+        rotation_deg = rotation_angle_deg(T_Clast_C[:3, :3])
+
+        depths = self.prev_points_3d_rect[:, 2]
+        depths = depths[np.isfinite(depths)]
+        depths = depths[depths > 0.0]
+        translation_ratio = (
+            translation / float(np.median(depths)) if len(depths) else 0.0
+        )
+        tracked_ratio = self.map.tracked_landmark_count(active_track_ids) / max(
+            1,
+            len(active_track_ids),
+        )
+
+        return (
+            translation_ratio >= self.keyframe_translation_depth_ratio
+            or rotation_deg >= self.keyframe_rotation_deg
+            or tracked_ratio < self.keyframe_tracked_landmark_ratio
+        )
+
+    def _rectified_points_to_output_camera(self, points_3d: np.ndarray) -> np.ndarray:
+        """Convert rectified-left points to the camera frame used by T_W_Cleft."""
+        return (self.R_C_Crect @ np.asarray(points_3d, dtype=np.float64).T).T
+
+    def _estimate_current_pose(
+        self,
+        left_rectified: np.ndarray,
+        right_rectified: np.ndarray,
+        timestamp: float,
+        tracking_result,
+        imu_rotation_prior: np.ndarray = None,
+    ) -> StereoPnPSLAMResult:
+        map_correspondences = MapCorrespondences()
+        if self.map is not None:
+            map_correspondences = self.local_matcher.match(
+                image=left_rectified,
+                points=tracking_result.active_points,
+                track_ids=tracking_result.active_ids,
+                sparse_map=self.map,
+                T_W_Crect=self.T_W_Cleft @ self.T_C_Crect,
+            )
+
+        map_solution = PnPSolution.failure(
+            len(map_correspondences.object_points),
+            "not enough map correspondences",
+        )
+        if len(map_correspondences.object_points) >= self.pnp.min_points:
+            map_solution = self.pnp.solve(
+                object_points=map_correspondences.object_points,
+                image_points=map_correspondences.image_points,
+                imu_rotation_prior=imu_rotation_prior,
+                motion_converter=self._rectified_world_to_output_motion,
+                refinement_T_Crect_object=(
+                    self.T_Crect_C @ invert_transform(self.T_W_Cleft)
+                ),
+            )
+
+        if map_solution.success:
+            solution = map_solution
+            pnp_image_points = map_correspondences.image_points
+            pose_source = "map"
+        else:
+            pnp_object_points, pnp_image_points = self._make_pnp_correspondences(
+                tracking_result
+            )
+            solution = PnPSolution.failure(
+                len(pnp_object_points),
+                "not enough PnP correspondences",
+            )
+            if len(pnp_object_points) >= self.pnp.min_points:
+                solution = self.pnp.solve(
+                    object_points=pnp_object_points,
+                    image_points=pnp_image_points,
+                    imu_rotation_prior=imu_rotation_prior,
+                    motion_converter=self._rectified_motion_to_output_motion,
+                )
+            pose_source = "vo_fallback" if solution.success else "none"
+
+        if solution.success:
+            self.T_W_Cleft = self.T_W_Cleft @ invert_transform(
+                solution.T_Ck_Cprev
+            )
+            if pose_source == "map":
+                self.T_W_Cleft[:3, :3] = orthonormalize_rotation(
+                    self.T_W_Cleft[:3, :3]
+                )
+        if solution.success and self.map is not None:
+            association_mask = map_solution.inlier_mask
+            if (
+                pose_source == "vo_fallback"
+                and len(map_correspondences.image_points)
+            ):
+                projected, visible = self.local_matcher.project(
+                    points_W=map_correspondences.object_points,
+                    T_W_Crect=self.T_W_Cleft @ self.T_C_Crect,
+                )
+                association_mask = visible & (
+                    np.linalg.norm(
+                        map_correspondences.image_points - projected,
+                        axis=1,
+                    )
+                    <= self.local_matcher.reprojection_gate_px
+                )
+            self.map.associate_tracks(
+                map_correspondences.track_ids[association_mask],
+                map_correspondences.landmark_ids[association_mask],
+            )
+
+        points_3d, depth_count = self._compute_depth_for_active_points(
+            left_rectified=left_rectified,
+            right_rectified=right_rectified,
+            active_points=tracking_result.active_points,
+        )
+        if pose_source == "vo_fallback" and self.map is not None:
+            valid = np.isfinite(points_3d).all(axis=1)
+            valid[valid] = (
+                (points_3d[valid, 2] > 0.0)
+                & (points_3d[valid, 2] <= self.max_landmark_depth)
+            )
+            self.map.update_landmark_positions(
+                tracking_result.active_ids[valid],
+                self._rectified_points_to_output_camera(points_3d[valid]),
+                self.T_W_Cleft,
+            )
+
+        self.prev_points_3d_rect = points_3d
+        pnp_inlier_count = int(np.count_nonzero(solution.inlier_mask))
+
+        return StereoPnPSLAMResult(
+            timestamp=timestamp,
+            success=solution.success,
+            initialized=True,
+            T_W_Cleft=self.T_W_Cleft.copy(),
+            track_count=tracking_result.track_count,
+            pnp_point_count=len(pnp_image_points),
+            pnp_inlier_count=pnp_inlier_count,
+            pose_source=pose_source,
+            map_point_count=len(map_correspondences.object_points),
+            map_inlier_count=int(np.count_nonzero(map_solution.inlier_mask)),
+            local_landmark_count=map_correspondences.local_landmark_count,
+            map_descriptor_match_count=map_correspondences.descriptor_match_count,
+            map_message=map_solution.message,
+            new_feature_count=tracking_result.detected_count,
+            reprojection_error_mean=solution.reprojection_error_mean,
+            reprojection_error_median=solution.reprojection_error_median,
+            pnp_rotation_step_deg=solution.pnp_rotation_step_deg,
+            imu_rotation_step_deg=solution.imu_rotation_step_deg,
+            pnp_imu_rotation_error_deg=solution.pnp_imu_rotation_error_deg,
+            imu_rotation_consistent=solution.imu_rotation_consistent,
+            imu_rejected=solution.imu_rejected,
+            reinitialized=False,
+            depth_count=depth_count,
+            message=solution.message,
+            tracked_points_curr=tracking_result.curr_points,
+            pnp_points_curr=pnp_image_points.astype(np.float32),
+            pnp_inlier_points_curr=pnp_image_points[solution.inlier_mask].astype(
+                np.float32
+            ),
+        )
+
+    def _make_pnp_correspondences(self, tracking_result) -> tuple:
+        if len(self.prev_points_3d_rect) == 0:
+            return empty_points(3, dtype=np.float64), empty_points(2)
+
+        status_mask = tracking_result.status_mask
+
+        if len(status_mask) != len(self.prev_points_3d_rect):
+            return empty_points(3, dtype=np.float64), empty_points(2)
+
+        object_points = self.prev_points_3d_rect[status_mask]
+        image_points = tracking_result.curr_points
+        valid_mask = np.isfinite(object_points).all(axis=1)
+        valid_mask &= object_points[:, 2] > 0.0
+
+        return (
+            object_points[valid_mask].astype(np.float64),
+            image_points[valid_mask].astype(np.float64),
+        )
+
+    def _compute_depth_for_active_points(
+        self,
+        left_rectified: np.ndarray,
+        right_rectified: np.ndarray,
+        active_points: np.ndarray,
+    ) -> tuple:
+        depth_result = self.depth_estimator.estimate(
+            left_img=left_rectified,
+            right_img=right_rectified,
+            left_points=active_points,
+        )
+
+        points_3d = np.full((len(active_points), 3), np.nan, dtype=np.float64)
+
+        if len(active_points) > 0 and len(depth_result.points_3d_left_camera) > 0:
+            points_3d[depth_result.valid_mask] = depth_result.points_3d_left_camera
+
+        return points_3d, depth_result.stats.triangulated_count
+
+    def _append_result(self, result: StereoPnPSLAMResult) -> None:
+        self.trajectory.append(
+            timestamp=result.timestamp,
+            pose=Pose.from_matrix(result.T_W_Cleft),
+        )
+        self.results.append(result)
+
+    def _rectified_motion_to_output_motion(self, T_Ckrect_Cprevrect) -> np.ndarray:
+        return self.T_C_Crect @ T_Ckrect_Cprevrect @ self.T_Crect_C
+
+    def _rectified_world_to_output_motion(self, T_Ckrect_W) -> np.ndarray:
+        T_Ck_Cprev = self.T_C_Crect @ T_Ckrect_W @ self.T_W_Cleft
+        T_Ck_Cprev[:3, :3] = orthonormalize_rotation(T_Ck_Cprev[:3, :3])
+        return T_Ck_Cprev
