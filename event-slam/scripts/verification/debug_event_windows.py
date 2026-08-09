@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 
@@ -15,16 +14,13 @@ if SRC_PATH.exists():
 
 
 from event_slam.debug.visualization import print_section
-from event_slam.datasets.evslam_reader import (
-    DEFAULT_LEFT_EVENT_TOPIC,
-    DEFAULT_RIGHT_EVENT_TOPIC,
-    EvSlamRosbagReader,
-)
+from event_slam.datasets.evslam_reader import EvSlamRosbagReader
 from event_slam.events.event_window import StereoEventWindowBuilder
+from verification_config import load_args, verification_parser
 
 
 def main() -> None:
-    args = parse_args()
+    _, args = parse_args()
 
     reader = EvSlamRosbagReader(
         bag_path=args.bag,
@@ -48,80 +44,6 @@ def main() -> None:
             num_windows=args.num_windows,
             sample_events=args.sample_events,
         )
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Debug fixed-time stereo event windows from an EvSLAM bag."
-    )
-
-    parser.add_argument(
-        "--bag",
-        required=True,
-        type=Path,
-        help="Path to the EvSLAM .bag file.",
-    )
-
-    parser.add_argument(
-        "--left-topic",
-        default=DEFAULT_LEFT_EVENT_TOPIC,
-        help="Left event topic.",
-    )
-
-    parser.add_argument(
-        "--right-topic",
-        default=DEFAULT_RIGHT_EVENT_TOPIC,
-        help="Right event topic.",
-    )
-
-    parser.add_argument(
-        "--time-window",
-        default=0.0333333333,
-        type=float,
-        help="Fixed event window duration in seconds.",
-    )
-
-    parser.add_argument(
-        "--num-windows",
-        default=10,
-        type=int,
-        help="Number of emitted windows to print.",
-    )
-
-    parser.add_argument(
-        "--sample-events",
-        default=5,
-        type=int,
-        help="Number of sample events printed from each camera in each window.",
-    )
-
-    parser.add_argument(
-        "--t-start",
-        default=None,
-        type=float,
-        help="Optional window start time in seconds.",
-    )
-
-    parser.add_argument(
-        "--t-end",
-        default=None,
-        type=float,
-        help="Optional processing end time in seconds.",
-    )
-
-    parser.add_argument(
-        "--drop-empty-windows",
-        action="store_true",
-        help="Skip windows that have no events in both cameras.",
-    )
-
-    parser.add_argument(
-        "--summary",
-        action="store_true",
-        help="Process the selected range and print only aggregate statistics.",
-    )
-
-    return parser.parse_args()
 
 
 def inspect_windows(
@@ -214,6 +136,17 @@ def print_sample_events(name: str, batch, sample_events: int) -> None:
             f"y={int(batch.y[index])}, "
             f"p={int(batch.p[index])}"
         )
+
+
+def parse_args() -> tuple:
+    parser = verification_parser(
+        "Debug fixed-time stereo event windows from an EvSLAM bag."
+    )
+    parser.add_argument("--num-windows", default=10, type=int)
+    parser.add_argument("--sample-events", default=5, type=int)
+    parser.add_argument("--drop-empty-windows", action="store_true")
+    parser.add_argument("--summary", action="store_true")
+    return load_args(parser)
 
 
 if __name__ == "__main__":

@@ -57,17 +57,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_config(path: Path) -> dict:
-    path = Path(path)
-
-    with open(path, "r", encoding="utf-8") as file:
+    with Path(path).open("r", encoding="utf-8") as file:
         config = yaml.safe_load(file)
 
-    if config is None:
-        raise ValueError(f"Empty config file: {path}")
-
     if not isinstance(config, dict):
-        raise ValueError(f"Config must be a YAML dictionary: {path}")
-
+        raise ValueError(f"Config must be a non-empty YAML dictionary: {path}")
     return config
 
 

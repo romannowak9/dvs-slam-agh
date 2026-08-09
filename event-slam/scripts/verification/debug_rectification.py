@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 
@@ -19,16 +18,8 @@ if SRC_PATH.exists():
 
 from event_slam.calibration.kalibr_parser import load_stereo_calibration
 from event_slam.calibration.stereo_rectifier import StereoRectifier
-from event_slam.datasets.evslam_reader import (
-    DEFAULT_LEFT_EVENT_TOPIC,
-    DEFAULT_RIGHT_EVENT_TOPIC,
-    EvSlamRosbagReader,
-)
-from event_slam.events.event_aggregator import (
-    EventFrameAggregator,
-    EventFrameMode,
-    PolarityMode,
-)
+from event_slam.datasets.evslam_reader import EvSlamRosbagReader
+from event_slam.events.event_aggregator import EventFrameAggregator
 from event_slam.events.event_filter import StereoBackgroundActivityFilter
 from event_slam.events.event_window import StereoEventWindowBuilder
 
@@ -38,10 +29,11 @@ from event_slam.debug.visualization import (
     save_image,
     show_image,
 )
+from verification_config import load_args, verification_parser
 
 
 def main() -> None:
-    args = parse_args()
+    _, args = parse_args()
 
     calibration = load_stereo_calibration(args.camera_yaml)
     image_shape = calibration.left.image_shape
@@ -88,7 +80,7 @@ def main() -> None:
     aggregator = EventFrameAggregator(
         image_shape=image_shape,
         mode=args.mode,
-        polarity_mode=PolarityMode.BOTH,
+        polarity_mode=args.polarity_mode,
         tau=args.tau,
     )
 
@@ -174,54 +166,6 @@ def main() -> None:
         print(f"output_dir: {Path(args.output_dir)}")
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Debug stereo rectification on EvSLAM event frames."
-    )
-
-    parser.add_argument("--bag", required=True, type=Path)
-    parser.add_argument("--camera-yaml", required=True, type=Path)
-
-    parser.add_argument("--left-topic", default=DEFAULT_LEFT_EVENT_TOPIC)
-    parser.add_argument("--right-topic", default=DEFAULT_RIGHT_EVENT_TOPIC)
-
-    parser.add_argument("--time-window", default=0.0333333333, type=float)
-    parser.add_argument("--num-frames", default=20, type=int, help="Number of frames to process. Use 0 to process the whole bag.",)
-
-    parser.add_argument(
-        "--mode",
-        default=EventFrameMode.STANDARD.value,
-        choices=[mode.value for mode in EventFrameMode],
-    )
-
-    parser.add_argument("--tau", default=0.03, type=float)
-
-    parser.add_argument("--use-baf", action="store_true")
-    parser.add_argument("--baf-time-window", default=1.0 / 24.0, type=float)
-    parser.add_argument("--baf-radius", default=2, type=int)
-    parser.add_argument("--baf-min-neighbors", default=1, type=int)
-
-    parser.add_argument("--t-start", default=None, type=float)
-    parser.add_argument("--t-end", default=None, type=float)
-
-    parser.add_argument("--alpha", default=0.0, type=float)
-    parser.add_argument(
-        "--interpolation",
-        default="nearest",
-        choices=["nearest", "linear"],
-    )
-
-    parser.add_argument("--draw-lines", action="store_true")
-    parser.add_argument("--line-step", default=40, type=int)
-
-    parser.add_argument("--output-dir", default="outputs/debug_rectification", type=Path)
-
-    parser.add_argument("--display", action="store_true")
-    parser.add_argument("--display-delay-ms", default=1, type=int)
-
-    return parser.parse_args()
-
-
 def print_rectification_info(rectifier: StereoRectifier) -> None:
     print()
     print("=" * 80)
@@ -254,6 +198,17 @@ def draw_horizontal_lines(image: np.ndarray, step: int) -> np.ndarray:
         )
 
     return image
+
+
+def parse_args() -> tuple:
+    parser = verification_parser(
+        "Debug stereo rectification on EvSLAM event frames."
+    )
+    parser.add_argument("--draw-lines", action="store_true")
+    parser.add_argument("--line-step", default=40, type=int)
+    parser.add_argument("--display", action="store_true")
+    parser.add_argument("--display-delay-ms", default=1, type=int)
+    return load_args(parser)
 
 
 if __name__ == "__main__":

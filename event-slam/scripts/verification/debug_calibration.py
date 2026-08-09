@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 
@@ -21,10 +20,11 @@ from event_slam.calibration.kalibr_parser import (
     load_stereo_calibration,
 )
 from event_slam.debug.visualization import print_section, print_vector
+from verification_config import load_args, verification_parser
 
 
 def main() -> None:
-    args = parse_args()
+    _, args = parse_args()
 
     stereo = load_stereo_calibration(args.camera_yaml)
     imu = load_imu_calibration(args.imu_yaml) if args.imu_yaml is not None else None
@@ -60,28 +60,6 @@ def main() -> None:
         print_matrix_or_none("T_imu_body", imu.T_imu_body)
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Debug EvSLAM/Kalibr camera and IMU calibration files."
-    )
-
-    parser.add_argument(
-        "--camera-yaml",
-        required=True,
-        type=Path,
-        help="Path to calib_results_cam_drone.yaml.",
-    )
-
-    parser.add_argument(
-        "--imu-yaml",
-        default=None,
-        type=Path,
-        help="Optional path to calib_results_imu_drone.yaml.",
-    )
-
-    return parser.parse_args()
-
-
 def print_camera(camera) -> None:
     print(f"name: {camera.name}")
     print(f"resolution: {camera.width} x {camera.height}")
@@ -102,6 +80,13 @@ def print_matrix_or_none(name: str, matrix: np.ndarray | None) -> None:
         return
 
     print_matrix(name, matrix)
+
+
+def parse_args() -> tuple:
+    parser = verification_parser(
+        "Debug EvSLAM/Kalibr camera and IMU calibration files."
+    )
+    return load_args(parser)
 
 
 if __name__ == "__main__":

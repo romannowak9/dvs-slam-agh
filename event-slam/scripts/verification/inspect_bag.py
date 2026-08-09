@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 
@@ -17,16 +16,12 @@ if SRC_PATH.exists():
 
 from event_slam.core.types import CameraId
 from event_slam.debug.visualization import print_section, print_vector
-from event_slam.datasets.evslam_reader import (
-    DEFAULT_LEFT_EVENT_TOPIC,
-    DEFAULT_LEFT_IMU_TOPIC,
-    DEFAULT_RIGHT_EVENT_TOPIC,
-    EvSlamRosbagReader,
-)
+from event_slam.datasets.evslam_reader import EvSlamRosbagReader
+from verification_config import load_args, verification_parser
 
 
 def main() -> None:
-    args = parse_args()
+    _, args = parse_args()
 
     reader = EvSlamRosbagReader(
         bag_path=args.bag,
@@ -59,68 +54,6 @@ def main() -> None:
 
     if args.full_scan:
         full_scan_event_topics(reader)
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Inspect an EvSLAM ROS bag without loading it into RAM."
-    )
-
-    parser.add_argument(
-        "--bag",
-        required=True,
-        type=Path,
-        help="Path to the EvSLAM .bag file.",
-    )
-
-    parser.add_argument(
-        "--left-topic",
-        default=DEFAULT_LEFT_EVENT_TOPIC,
-        help="Left event topic.",
-    )
-
-    parser.add_argument(
-        "--right-topic",
-        default=DEFAULT_RIGHT_EVENT_TOPIC,
-        help="Right event topic.",
-    )
-
-    parser.add_argument(
-        "--imu-topic",
-        default=DEFAULT_LEFT_IMU_TOPIC,
-        help="IMU topic used when --inspect-imu is enabled.",
-    )
-
-    parser.add_argument(
-        "--num-batches",
-        default=3,
-        type=int,
-        help="Number of event batches to inspect per camera.",
-    )
-
-    parser.add_argument(
-        "--sample-events",
-        default=5,
-        type=int,
-        help="Number of sample events printed from each inspected batch.",
-    )
-
-    parser.add_argument(
-        "--inspect-imu",
-        action="store_true",
-        help="Print a few IMU samples.",
-    )
-
-    parser.add_argument(
-        "--full-scan",
-        action="store_true",
-        help=(
-            "Scan the whole bag and count event messages/events per event topic. "
-            "This still does not store the full sequence in RAM."
-        ),
-    )
-
-    return parser.parse_args()
 
 
 def print_bag_summary(reader: EvSlamRosbagReader) -> None:
@@ -290,6 +223,17 @@ def update_time_range(stats: dict, timestamp: float) -> None:
 
     if stats["t_max"] is None or timestamp > stats["t_max"]:
         stats["t_max"] = timestamp
+
+
+def parse_args() -> tuple:
+    parser = verification_parser(
+        "Inspect an EvSLAM ROS bag without loading it into RAM."
+    )
+    parser.add_argument("--num-batches", default=3, type=int)
+    parser.add_argument("--sample-events", default=5, type=int)
+    parser.add_argument("--inspect-imu", action="store_true")
+    parser.add_argument("--full-scan", action="store_true")
+    return load_args(parser)
 
 
 if __name__ == "__main__":

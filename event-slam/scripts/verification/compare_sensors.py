@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 
@@ -18,16 +17,8 @@ if SRC_PATH.exists():
 
 
 from event_slam.core.types import StereoEventWindow
-from event_slam.datasets.evslam_reader import (
-    DEFAULT_LEFT_EVENT_TOPIC,
-    DEFAULT_RIGHT_EVENT_TOPIC,
-    EvSlamRosbagReader,
-)
-from event_slam.events.event_aggregator import (
-    EventFrameAggregator,
-    EventFrameMode,
-    PolarityMode,
-)
+from event_slam.datasets.evslam_reader import EvSlamRosbagReader
+from event_slam.events.event_aggregator import EventFrameAggregator
 from event_slam.events.event_filter import BackgroundActivityFilter
 from event_slam.events.event_window import StereoEventWindowBuilder
 
@@ -36,6 +27,7 @@ from event_slam.debug.visualization import (
     save_image,
     show_image,
 )
+from verification_config import load_args, verification_parser
 
 
 DEFAULT_COLOR_TOPIC = "/camera/color/image_raw/compressed"
@@ -44,7 +36,7 @@ DEFAULT_INFRA_TOPIC = "/camera/infra1/image_rect_raw/compressed"
 
 
 def main() -> None:
-    args = parse_args()
+    _, args = parse_args()
 
     image_shape = (args.height, args.width)
 
@@ -123,7 +115,7 @@ def main() -> None:
 
     processed = 0
 
-    while processed < args.num_frames and args.num_frames == 0:
+    while args.num_frames == 0 or processed < args.num_frames:
         color_item = color_stream.get_next()
 
         if color_item is None:
@@ -200,76 +192,20 @@ def main() -> None:
         print(f"output_dir: {output_dir}")
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Compare event frames with regular camera frames from EvSLAM bag."
+def parse_args() -> tuple:
+    parser = verification_parser(
+        "Compare event frames with regular camera frames from an EvSLAM bag."
     )
-
-    parser.add_argument("--bag", required=True, type=Path)
-
-    parser.add_argument("--left-topic", default=DEFAULT_LEFT_EVENT_TOPIC)
-    parser.add_argument("--right-topic", default=DEFAULT_RIGHT_EVENT_TOPIC)
-
     parser.add_argument("--color-topic", default=DEFAULT_COLOR_TOPIC)
     parser.add_argument("--depth-topic", default=DEFAULT_DEPTH_TOPIC)
     parser.add_argument("--infra-topic", default=DEFAULT_INFRA_TOPIC)
-
-    parser.add_argument("--time-window", default=0.0333333333, type=float)
-    parser.add_argument("--num-frames", default=20, type=int, help="Number of frames to process. Use 0 to process the whole bag.",)
     parser.add_argument("--height", default=480, type=int)
     parser.add_argument("--width", default=640, type=int)
-
-    parser.add_argument(
-        "--mode",
-        default=EventFrameMode.STANDARD.value,
-        choices=[mode.value for mode in EventFrameMode],
-    )
-
-    parser.add_argument(
-        "--polarity-mode",
-        default=PolarityMode.BOTH.value,
-        choices=[mode.value for mode in PolarityMode],
-    )
-
-    parser.add_argument("--tau", default=0.03, type=float)
-
-    parser.add_argument("--use-baf", action="store_true")
-    parser.add_argument("--baf-time-window", default=1.0 / 24.0, type=float)
-    parser.add_argument("--baf-radius", default=2, type=int)
-    parser.add_argument("--baf-min-neighbors", default=1, type=int)
-
-    parser.add_argument("--t-start", default=None, type=float)
-    parser.add_argument("--t-end", default=None, type=float)
-
-    parser.add_argument(
-        "--match-margin",
-        default=0.1,
-        type=float,
-        help="How many seconds before t_start should image streams start reading.",
-    )
-
-    parser.add_argument(
-        "--only-color",
-        action="store_true",
-        help="Compare only color camera with left event frame.",
-    )
-
-    parser.add_argument("--output-dir", default="outputs/camera_compare", type=Path)
-
-    parser.add_argument(
-        "--display",
-        action="store_true",
-        help="Display comparison frames instead of saving images.",
-    )
-
-    parser.add_argument(
-        "--display-delay-ms",
-        default=1,
-        type=int,
-        help="Delay for cv2.waitKey in display mode. Use 0 to step frame by frame.",
-    )
-
-    return parser.parse_args()
+    parser.add_argument("--match-margin", default=0.1, type=float)
+    parser.add_argument("--only-color", action="store_true")
+    parser.add_argument("--display", action="store_true")
+    parser.add_argument("--display-delay-ms", default=1, type=int)
+    return load_args(parser)
 
 
 class _NearestTimestampStream:

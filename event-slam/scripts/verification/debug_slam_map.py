@@ -2,20 +2,12 @@
 
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 
 import cv2
-import matplotlib
-import mpl_toolkits.mplot3d  # Register the Matplotlib 3D projection.
 import numpy as np
 import yaml
-
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SRC_PATH = PROJECT_ROOT / "src"
@@ -31,8 +23,13 @@ from event_slam.debug.visualization import (
     save_image,
     show_image,
 )
+from event_slam.debug.slam_plots import (
+    save_sparse_map_plot,
+    save_tracking_diagnostics_plot,
+)
 from event_slam.io.result_io import save_outputs
 from event_slam.setup import create_pipeline
+from verification_config import load_args, verification_parser
 
 
 class SlamMapVisualizer:
@@ -106,120 +103,47 @@ class SlamMapVisualizer:
 
     def save_map_plot(self) -> Path:
         sparse_map = self.pipeline.slam.map
-        all_landmarks = list(sparse_map.landmarks.values())
-        landmarks = [
-            item
-            for item in all_landmarks
-            if np.linalg.norm(item.position_C_anchor) <= self.max_plot_distance
-        ]
-        keyframes = sparse_map.keyframes
-
-        positions_W = np.asarray([item.position_W for item in landmarks])
-        observations = np.asarray([item.observation_count for item in landmarks])
-        camera_positions = np.asarray([item.T_W_C[:3, 3] for item in keyframes])
-
-        figure = plt.figure(figsize=(10, 8))
-        axes = figure.add_subplot(111, projection="3d")
-        scatter = axes.scatter(
-            positions_W[:, 0],
-            positions_W[:, 2],
-            positions_W[:, 1],
-            c=observations,
-            cmap="viridis",
-            s=4,
-            alpha=0.7,
-            label="landmarks",
+        landmarks = list(sparse_map.landmarks.values())
+        return save_sparse_map_plot(
+            keyframe_positions_W=np.asarray(
+                [item.T_W_C[:3, 3] for item in sparse_map.keyframes]
+            ),
+            landmark_positions_W=np.asarray(
+                [item.position_W for item in landmarks]
+            ),
+            landmark_positions_C_anchor=np.asarray(
+                [item.position_C_anchor for item in landmarks]
+            ),
+            observation_counts=np.asarray(
+                [item.observation_count for item in landmarks]
+            ),
+            path=self.output_dir / "map_3d.png",
+            max_plot_distance=self.max_plot_distance,
         )
-        axes.plot(
-            camera_positions[:, 0],
-            camera_positions[:, 2],
-            camera_positions[:, 1],
-            "r.-",
-            linewidth=1.5,
-            label="keyframes",
-        )
-        axes.set_xlabel("world X - right [m]")
-        axes.set_ylabel("world Z - forward [m]")
-        axes.set_zlabel("world Y - down [m]")
-        axes.invert_zaxis()
-        axes.set_title(
-            f"Sparse map: {len(keyframes)} keyframes, "
-            f"{len(landmarks)}/{len(all_landmarks)} landmarks within "
-            f"{self.max_plot_distance:g} m"
-        )
-        axes.legend()
-        figure.colorbar(scatter, ax=axes, label="observation count", shrink=0.7)
-        figure.tight_layout()
-
-        path = self.output_dir / "map_3d.png"
-        figure.savefig(path, dpi=160)
-        plt.close(figure)
-        return path
 
     def save_tracking_plot(self) -> Path:
         """Plot map correspondences and the selected pose source per frame."""
         results = self.pipeline.slam.results
-        frames = np.arange(len(results))
-        sources = {
-            "none": 0,
-            "vo_fallback": 1,
-            "map": 2,
-            "relocalization": 3,
-            "initialization": 4,
-        }
-
-        figure, axes = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
-        axes[0].plot(frames, [r.track_count for r in results], label="tracked features")
-        axes[0].plot(
-            frames,
-            [r.track_count + r.new_feature_count for r in results],
-            label="active features",
+        return save_tracking_diagnostics_plot(
+            track_counts=np.asarray([item.track_count for item in results]),
+            new_feature_counts=np.asarray(
+                [item.new_feature_count for item in results]
+            ),
+            map_point_counts=np.asarray([item.map_point_count for item in results]),
+            map_inlier_counts=np.asarray(
+                [item.map_inlier_count for item in results]
+            ),
+            pnp_inlier_counts=np.asarray([item.pnp_inlier_count for item in results]),
+            pose_sources=np.asarray([item.pose_source for item in results]),
+            descriptor_match_counts=np.asarray(
+                [item.map_descriptor_match_count for item in results]
+            ),
+            path=self.output_dir / "tracking_diagnostics.png",
         )
-        axes[0].plot(frames, [r.map_point_count for r in results], label="map points")
-        axes[0].plot(frames, [r.map_inlier_count for r in results], label="map inliers")
-        axes[0].plot(frames, [r.pnp_inlier_count for r in results], label="used inliers")
-        axes[0].set_ylabel("count")
-        axes[0].legend()
-        axes[0].grid(alpha=0.25)
-
-        axes[1].scatter(
-            frames,
-            [sources[r.pose_source] for r in results],
-            c=[sources[r.pose_source] for r in results],
-            cmap="viridis",
-            s=18,
-        )
-        descriptor_frames = [
-            index
-            for index, result in enumerate(results)
-            if result.map_descriptor_match_count > 0
-        ]
-        axes[1].scatter(
-            descriptor_frames,
-            [sources[results[index].pose_source] for index in descriptor_frames],
-            marker="x",
-            s=60,
-            color="red",
-            label="ORB recovery",
-        )
-        axes[1].set_yticks(list(sources.values()))
-        axes[1].set_yticklabels(list(sources))
-        axes[1].set_xlabel("frame")
-        axes[1].set_ylabel("pose source")
-        axes[1].grid(alpha=0.25)
-        axes[1].legend()
-        figure.tight_layout()
-
-        path = self.output_dir / "tracking_diagnostics.png"
-        figure.savefig(path, dpi=160)
-        plt.close(figure)
-        return path
 
 
 def main() -> None:
-    args = parse_args()
-    with args.config.open("r", encoding="utf-8") as file:
-        config = yaml.safe_load(file)
+    config, args = parse_args()
 
     if not config.get("slam", {}).get("enabled", False):
         raise ValueError("The selected config must have slam.enabled=true")
@@ -259,35 +183,14 @@ def main() -> None:
     print(f"tracking_plot: {tracking_path}")
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Visualize SLAM keyframes, landmark observations and sparse map."
-    )
-    parser.add_argument(
-        "--config",
-        default=PROJECT_ROOT / "configs/evslam_seq007_test_imu.yaml",
-        type=Path,
-    )
-    parser.add_argument(
-        "--num-frames",
-        default=120,
-        type=int,
-        help="Frames to process; use 0 for the whole configured sequence.",
-    )
-    parser.add_argument(
-        "--output-dir",
-        default=PROJECT_ROOT / "outputs/debug_slam_map",
-        type=Path,
+def parse_args() -> tuple:
+    parser = verification_parser(
+        "Visualize SLAM keyframes, observations and sparse map."
     )
     parser.add_argument("--display", action="store_true")
     parser.add_argument("--display-delay-ms", default=1, type=int)
-    parser.add_argument(
-        "--max-plot-distance",
-        default=5.0,
-        type=float,
-        help="Hide landmarks farther from their anchor camera on the 3D plot.",
-    )
-    return parser.parse_args()
+    parser.add_argument("--max-plot-distance", default=5.0, type=float)
+    return load_args(parser)
 
 
 if __name__ == "__main__":
