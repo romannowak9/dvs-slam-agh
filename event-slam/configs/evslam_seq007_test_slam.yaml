@@ -81,6 +81,26 @@ slam:
   descriptor_ratio: 0.75
   reprojection_gate_px: 15.0
 
+  loop_closure:
+    enabled: true
+    min_keyframe_gap: 20
+    descriptor_ratio: 0.75
+    min_matches: 30
+    max_candidates: 3
+    min_inliers: 20
+    min_inlier_ratio: 0.3
+    max_reprojection_median: 3.0
+
+  pose_graph:
+    translation_weight: 1.0
+    rotation_weight: 1.0
+    huber_scale: 1.0
+    max_evaluations: 100
+
+  relocalization:
+    enabled: true
+    failure_count: 3
+
 velocity:
   enabled: true
   output_csv: velocity.csv
@@ -88,8 +108,9 @@ velocity:
   smoothing_poly_order: 2
 
 output:
-  output_dir: outputs/evslam_slam_seq007
+  output_dir: outputs/evslam_seq007_slam
   trajectory_csv: trajectory.csv
   result_txt: result_seq007.txt
   keyframes_csv: keyframes.csv
   landmarks_csv: landmarks.csv
+  pose_graph_csv: pose_graph.csv

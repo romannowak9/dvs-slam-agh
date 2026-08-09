@@ -28,7 +28,6 @@ rectification:
 
 feature_tracker:
   detector: gftt  # or fast
-  min_features: 250
   max_features: 1000
   fast_threshold: 25
   forward_backward_check: false
