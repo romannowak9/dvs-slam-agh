@@ -15,10 +15,13 @@ from event_slam.core.imu import rotation_angle_deg
 from event_slam.core.trajectory import Trajectory
 from event_slam.slam.local_matching import LocalMapMatcher, MapCorrespondences
 from event_slam.slam.map import SparseMap
+from event_slam.slam.place_recognition import PlaceRecognizer
+from event_slam.slam.pose_graph import PoseGraph
 from event_slam.slam.results import StereoPnPSLAMResult, StereoPnPSLAMSummary
 from event_slam.vo.feature_tracker import FeatureTracker
 from event_slam.vo.pnp import PnPSolution, PnPSolver
 from event_slam.vo.stereo_depth import StereoDepthEstimator
+
 
 class StereoPnPSLAM:
     """
@@ -132,6 +135,41 @@ class StereoPnPSLAM:
         self.T_C_Crect = make_transform(self.R_C_Crect, np.zeros(3))
         self.T_Crect_C = invert_transform(self.T_C_Crect)
 
+        loop_cfg = slam_params.get("loop_closure", {})
+        graph_cfg = slam_params.get("pose_graph", {})
+        relocalization_cfg = slam_params.get("relocalization", {})
+        self.loop_enabled = self.slam_enabled and bool(
+            loop_cfg.get("enabled", True)
+        )
+        self.loop_min_keyframe_gap = int(loop_cfg.get("min_keyframe_gap", 20))
+        self.relocalization_enabled = self.slam_enabled and bool(
+            relocalization_cfg.get("enabled", True)
+        )
+        self.relocalization_failure_count = int(
+            relocalization_cfg.get("failure_count", 3)
+        )
+        self.pose_graph_params = {
+            "translation_weight": graph_cfg.get("translation_weight", 1.0),
+            "rotation_weight": graph_cfg.get("rotation_weight", 1.0),
+            "huber_scale": graph_cfg.get("huber_scale", 1.0),
+            "max_evaluations": graph_cfg.get("max_evaluations", 100),
+        }
+        self.place_recognizer = PlaceRecognizer(
+            K=self.K,
+            motion_converter=self._rectified_candidate_to_output_motion,
+            descriptor_ratio=loop_cfg.get("descriptor_ratio", 0.75),
+            min_matches=loop_cfg.get("min_matches", 30),
+            max_candidates=loop_cfg.get("max_candidates", 3),
+            min_inliers=loop_cfg.get("min_inliers", 20),
+            min_inlier_ratio=loop_cfg.get("min_inlier_ratio", 0.3),
+            max_reprojection_median=loop_cfg.get(
+                "max_reprojection_median", 3.0
+            ),
+            pnp_reprojection_error=pnp_reprojection_error,
+            pnp_confidence=pnp_confidence,
+            pnp_iterations=pnp_iterations,
+        )
+
         self.reset()
 
     def reset(self) -> None:
@@ -146,6 +184,10 @@ class StereoPnPSLAM:
         self.trajectory = Trajectory()
         self.results = []
         self.map = SparseMap() if self.slam_enabled else None
+        self.pose_graph = PoseGraph(**self.pose_graph_params) if self.map else None
+        self.consecutive_failures = 0
+        self.last_graph_cost_before = np.nan
+        self.last_graph_cost_after = np.nan
 
     def get_summary(self) -> StereoPnPSLAMSummary:
         inliers = [
@@ -168,6 +210,10 @@ class StereoPnPSLAM:
             final_position=final_position,
             keyframe_count=len(self.map.keyframes) if self.map is not None else 0,
             landmark_count=len(self.map.landmarks) if self.map is not None else 0,
+            accepted_loop_count=sum(result.loop_accepted for result in self.results),
+            relocalization_count=sum(result.relocalized for result in self.results),
+            graph_cost_before=self.last_graph_cost_before,
+            graph_cost_after=self.last_graph_cost_after,
         )
 
     def process(
@@ -204,6 +250,7 @@ class StereoPnPSLAM:
                 message="initialized",
             )
 
+            self._set_frame_reference(result)
             self._update_map(left_rectified, tracking_result, result)
             self._append_result(result)
             return result
@@ -216,6 +263,7 @@ class StereoPnPSLAM:
             imu_rotation_prior=imu_rotation_prior,
         )
 
+        self._set_frame_reference(result)
         self._update_map(left_rectified, tracking_result, result)
         self._append_result(result)
         return result
@@ -244,7 +292,8 @@ class StereoPnPSLAM:
         if not np.any(valid):
             return
 
-        self.map.add_keyframe(
+        previous_keyframe = self.map.last_keyframe
+        keyframe = self.map.add_keyframe(
             frame_index=frame_index,
             timestamp=result.timestamp,
             T_W_C=result.T_W_Cleft,
@@ -254,6 +303,93 @@ class StereoPnPSLAM:
             track_ids=tracking_result.active_ids[indices][valid],
         )
         self.map.prune_landmarks(self.local_matcher.keyframe_count)
+        result.is_keyframe = True
+        result.reference_keyframe_id = keyframe.id
+        result.T_C_ref_C_frame = np.eye(4, dtype=np.float64)
+
+        if previous_keyframe is not None:
+            self.pose_graph.add_edge(
+                previous_keyframe.id,
+                keyframe.id,
+                invert_transform(previous_keyframe.T_W_C) @ keyframe.T_W_C,
+                "sequential",
+            )
+        if self.loop_enabled:
+            self._try_loop_closure(keyframe, result)
+
+    def _set_frame_reference(self, result: StereoPnPSLAMResult) -> None:
+        if (
+            result.reference_keyframe_id >= 0
+            or self.map is None
+            or self.map.last_keyframe is None
+        ):
+            return
+        reference = self.map.last_keyframe
+        result.reference_keyframe_id = reference.id
+        result.T_C_ref_C_frame = (
+            invert_transform(reference.T_W_C) @ result.T_W_Cleft
+        )
+
+    def _try_loop_closure(self, keyframe, result: StereoPnPSLAMResult) -> None:
+        last_candidate_id = keyframe.id - self.loop_min_keyframe_gap
+        if last_candidate_id < 0:
+            return
+
+        recognition = self.place_recognizer.recognize(
+            points_2d=keyframe.points_2d,
+            descriptors=keyframe.descriptors,
+            sparse_map=self.map,
+            candidate_ids=range(last_candidate_id + 1),
+        )
+        result.loop_candidate_count = len(recognition.candidates)
+        if recognition.candidates:
+            best = recognition.candidates[0]
+            result.loop_candidate_id = best.keyframe_id
+            result.loop_match_count = best.match_count
+        if recognition.verification is None:
+            return
+
+        verification = recognition.verification
+        solution = verification.solution
+        candidate_id = verification.candidate.keyframe_id
+        result.loop_candidate_id = candidate_id
+        result.loop_match_count = verification.candidate.match_count
+        result.loop_accepted = True
+        self.pose_graph.add_edge(
+            candidate_id,
+            keyframe.id,
+            invert_transform(solution.T_Ck_Cprev),
+            "loop",
+            inlier_count=int(np.count_nonzero(solution.inlier_mask)),
+            reprojection_error_median=solution.reprojection_error_median,
+        )
+
+        optimization = self.pose_graph.optimize(self.map.keyframes)
+        result.graph_cost_before = optimization.cost_before
+        result.graph_cost_after = optimization.cost_after
+        self.last_graph_cost_before = optimization.cost_before
+        self.last_graph_cost_after = optimization.cost_after
+        if optimization.success:
+            self._apply_graph_correction(optimization.poses, result)
+
+    def _apply_graph_correction(self, poses, current_result) -> None:
+        for keyframe, pose in zip(self.map.keyframes, poses):
+            keyframe.T_W_C = pose
+        self.map.update_world_positions()
+
+        for result in self.results + [current_result]:
+            if result.reference_keyframe_id < 0:
+                continue
+            reference = self.map.keyframes[result.reference_keyframe_id]
+            result.T_W_Cleft = reference.T_W_C @ result.T_C_ref_C_frame
+
+        self.T_W_Cleft = current_result.T_W_Cleft.copy()
+        self.trajectory = Trajectory()
+        for result in self.results:
+            self.trajectory.append(
+                result.timestamp,
+                Pose.from_matrix(result.T_W_Cleft),
+            )
 
     def _should_create_keyframe(
         self,
@@ -346,7 +482,38 @@ class StereoPnPSLAM:
                 )
             pose_source = "vo_fallback" if solution.success else "none"
 
-        if solution.success:
+        relocalized = False
+        relocalization_keyframe_id = -1
+        if not solution.success:
+            relocalization = self._try_relocalization(
+                left_rectified,
+                tracking_result,
+            )
+            if relocalization is not None:
+                verification, described_indices = relocalization
+                solution = verification.solution
+                current_indices = verification.candidate.current_indices
+                pnp_image_points = tracking_result.active_points[
+                    described_indices[current_indices]
+                ].astype(np.float64)
+                candidate = self.map.keyframes[
+                    verification.candidate.keyframe_id
+                ]
+                relocalization_keyframe_id = candidate.id
+                self.T_W_Cleft = candidate.T_W_C @ invert_transform(
+                    solution.T_Ck_Cprev
+                )
+                inliers = solution.inlier_mask
+                self.map.associate_tracks(
+                    tracking_result.active_ids[
+                        described_indices[current_indices]
+                    ][inliers],
+                    verification.landmark_ids[inliers],
+                )
+                pose_source = "relocalization"
+                relocalized = True
+
+        if solution.success and not relocalized:
             self.T_W_Cleft = self.T_W_Cleft @ invert_transform(
                 solution.T_Ck_Cprev
             )
@@ -354,7 +521,11 @@ class StereoPnPSLAM:
                 self.T_W_Cleft[:3, :3] = orthonormalize_rotation(
                     self.T_W_Cleft[:3, :3]
                 )
-        if solution.success and self.map is not None:
+        if (
+            solution.success
+            and self.map is not None
+            and pose_source in ("map", "vo_fallback")
+        ):
             association_mask = map_solution.inlier_mask
             if (
                 pose_source == "vo_fallback"
@@ -395,6 +566,9 @@ class StereoPnPSLAM:
 
         self.prev_points_3d_rect = points_3d
         pnp_inlier_count = int(np.count_nonzero(solution.inlier_mask))
+        self.consecutive_failures = (
+            0 if solution.success else self.consecutive_failures + 1
+        )
 
         return StereoPnPSLAMResult(
             timestamp=timestamp,
@@ -426,7 +600,42 @@ class StereoPnPSLAM:
             pnp_inlier_points_curr=pnp_image_points[solution.inlier_mask].astype(
                 np.float32
             ),
+            tracking_state="TRACKING" if solution.success else "LOST",
+            reference_keyframe_id=relocalization_keyframe_id,
+            T_C_ref_C_frame=(
+                invert_transform(self.map.keyframes[relocalization_keyframe_id].T_W_C)
+                @ self.T_W_Cleft
+                if relocalization_keyframe_id >= 0
+                else np.eye(4, dtype=np.float64)
+            ),
+            relocalized=relocalized,
         )
+
+    def _try_relocalization(self, image, tracking_result):
+        if (
+            not self.relocalization_enabled
+            or self.map is None
+            or not self.map.keyframes
+            or self.consecutive_failures + 1 < self.relocalization_failure_count
+        ):
+            return None
+
+        descriptors, described_indices = self.tracker.describe(
+            image,
+            tracking_result.active_points,
+        )
+        if len(described_indices) == 0:
+            return None
+
+        recognition = self.place_recognizer.recognize(
+            points_2d=tracking_result.active_points[described_indices],
+            descriptors=descriptors,
+            sparse_map=self.map,
+            candidate_ids=range(len(self.map.keyframes)),
+        )
+        if recognition.verification is None:
+            return None
+        return recognition.verification, described_indices
 
     def _make_pnp_correspondences(self, tracking_result) -> tuple:
         if len(self.prev_points_3d_rect) == 0:
@@ -475,6 +684,9 @@ class StereoPnPSLAM:
 
     def _rectified_motion_to_output_motion(self, T_Ckrect_Cprevrect) -> np.ndarray:
         return self.T_C_Crect @ T_Ckrect_Cprevrect @ self.T_Crect_C
+
+    def _rectified_candidate_to_output_motion(self, T_Ckrect_Ccandidate) -> np.ndarray:
+        return self.T_C_Crect @ T_Ckrect_Ccandidate
 
     def _rectified_world_to_output_motion(self, T_Ckrect_W) -> np.ndarray:
         T_Ck_Cprev = self.T_C_Crect @ T_Ckrect_W @ self.T_W_Cleft

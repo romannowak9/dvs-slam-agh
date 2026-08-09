@@ -12,10 +12,8 @@ from event_slam.events.imu_motion_compensation import (
 
 
 @dataclass
-class EvSlamStereoVOSummary:
-    """
-    Summary of one VO pipeline run.
-    """
+class EvSlamSummary:
+    """Summary of one event-based SLAM run."""
 
     processed_frames: int
     successful_steps: int
@@ -29,11 +27,15 @@ class EvSlamStereoVOSummary:
     imu_rejected_steps: int = 0
     keyframe_count: int = 0
     landmark_count: int = 0
+    accepted_loop_count: int = 0
+    relocalization_count: int = 0
+    graph_cost_before: float = np.nan
+    graph_cost_after: float = np.nan
 
 
-class EvSlamStereoVOPipeline:
+class EvSlamPipeline:
     """
-    Connect configured event processing, rectification and stereo VO modules.
+    Connect event processing, rectification and stereo SLAM modules.
 
     Configuration parsing and module construction are intentionally kept outside
     this class. The pipeline only passes each stage's output to the next stage.
@@ -93,7 +95,7 @@ class EvSlamStereoVOPipeline:
         """
         return self.slam.trajectory
 
-    def run(self) -> EvSlamStereoVOSummary:
+    def run(self) -> EvSlamSummary:
         for frame_index, window in enumerate(self.window_builder.iter_windows()):
             if self.num_frames > 0 and len(self.slam.results) >= self.num_frames:
                 break
@@ -151,7 +153,7 @@ class EvSlamStereoVOPipeline:
         )
         return self.velocity_trajectory
 
-    def get_summary(self) -> EvSlamStereoVOSummary:
+    def get_summary(self) -> EvSlamSummary:
         """
         Return summary statistics for the current run.
         """
@@ -162,7 +164,7 @@ class EvSlamStereoVOPipeline:
         else:
             velocity_samples = len(self.velocity_trajectory)
 
-        return EvSlamStereoVOSummary(
+        return EvSlamSummary(
             processed_frames=slam_summary.processed_frames,
             successful_steps=slam_summary.successful_steps,
             failed_frames=slam_summary.failed_frames,
@@ -175,6 +177,10 @@ class EvSlamStereoVOPipeline:
             imu_rejected_steps=self.imu_rejected_steps,
             keyframe_count=slam_summary.keyframe_count,
             landmark_count=slam_summary.landmark_count,
+            accepted_loop_count=slam_summary.accepted_loop_count,
+            relocalization_count=slam_summary.relocalization_count,
+            graph_cost_before=slam_summary.graph_cost_before,
+            graph_cost_after=slam_summary.graph_cost_after,
         )
 
     def _compensate_window(self, window: StereoEventWindow) -> StereoEventWindow:

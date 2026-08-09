@@ -14,6 +14,7 @@ class Keyframe:
     timestamp: float
     T_W_C: np.ndarray
     points_2d: np.ndarray
+    points_C: np.ndarray
     descriptors: np.ndarray
     landmark_ids: np.ndarray
 
@@ -98,10 +99,20 @@ class SparseMap:
                 ]
             )
             keyframe.points_2d = keyframe.points_2d[keep]
+            keyframe.points_C = keyframe.points_C[keep]
             keyframe.descriptors = keyframe.descriptors[keep]
             keyframe.landmark_ids = keyframe.landmark_ids[keep]
 
         return len(removed_ids)
+
+    def update_world_positions(self) -> None:
+        """Move anchored landmarks with their optimized keyframes."""
+        for landmark in self.landmarks.values():
+            anchor = self.keyframes[landmark.anchor_keyframe_id]
+            landmark.position_W = transform_points(
+                anchor.T_W_C,
+                landmark.position_C_anchor,
+            )
 
     def update_landmark_positions(
         self,
@@ -177,6 +188,7 @@ class SparseMap:
             timestamp=float(timestamp),
             T_W_C=np.asarray(T_W_C, dtype=np.float64).copy(),
             points_2d=np.asarray(points_2d, dtype=np.float32).copy(),
+            points_C=np.asarray(points_C, dtype=np.float64).copy(),
             descriptors=np.asarray(descriptors, dtype=np.uint8).copy(),
             landmark_ids=landmark_ids,
         )

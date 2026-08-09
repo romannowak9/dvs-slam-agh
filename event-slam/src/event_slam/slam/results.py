@@ -49,6 +49,20 @@ class StereoPnPSLAMResult:
         default_factory=lambda: empty_points(2)
     )
 
+    tracking_state: str = "TRACKING"
+    reference_keyframe_id: int = -1
+    T_C_ref_C_frame: np.ndarray = field(
+        default_factory=lambda: np.eye(4, dtype=np.float64)
+    )
+    is_keyframe: bool = False
+    loop_candidate_count: int = 0
+    loop_candidate_id: int = -1
+    loop_match_count: int = 0
+    loop_accepted: bool = False
+    relocalized: bool = False
+    graph_cost_before: float = np.nan
+    graph_cost_after: float = np.nan
+
 
 @dataclass
 class StereoPnPSLAMSummary:
@@ -59,3 +73,7 @@ class StereoPnPSLAMSummary:
     final_position: np.ndarray
     keyframe_count: int = 0
     landmark_count: int = 0
+    accepted_loop_count: int = 0
+    relocalization_count: int = 0
+    graph_cost_before: float = np.nan
+    graph_cost_after: float = np.nan

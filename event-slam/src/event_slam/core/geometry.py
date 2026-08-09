@@ -90,6 +90,54 @@ def rotvec_to_rotmat(rotation_vector: np.ndarray) -> np.ndarray:
     )
 
 
+def rotmat_to_rotvec(R: np.ndarray) -> np.ndarray:
+    """Convert a rotation matrix to its shortest axis-angle vector."""
+    q = rotmat_to_quat_xyzw(orthonormalize_rotation(R))
+    if q[3] < 0.0:
+        q = -q
+    sin_half = float(np.linalg.norm(q[:3]))
+    if sin_half < 1e-12:
+        return 2.0 * q[:3]
+    angle = 2.0 * np.arctan2(sin_half, q[3])
+    return q[:3] * (angle / sin_half)
+
+
+def se3_exp(xi: np.ndarray) -> np.ndarray:
+    """Map a twist ``[translation, rotation]`` from se(3) to SE(3)."""
+    xi = as_float_array(xi, (6,), "xi")
+    rho, phi = xi[:3], xi[3:]
+    theta = float(np.linalg.norm(phi))
+    Omega = skew(phi)
+
+    if theta < 1e-8:
+        V = np.eye(3) + 0.5 * Omega + (Omega @ Omega) / 6.0
+    else:
+        V = (
+            np.eye(3)
+            + (1.0 - np.cos(theta)) / theta**2 * Omega
+            + (theta - np.sin(theta)) / theta**3 * (Omega @ Omega)
+        )
+    return make_transform(rotvec_to_rotmat(phi), V @ rho)
+
+
+def se3_log(T: np.ndarray) -> np.ndarray:
+    """Map an SE(3) transform to a twist ``[translation, rotation]``."""
+    T = as_float_array(T, (4, 4), "T")
+    phi = rotmat_to_rotvec(T[:3, :3])
+    theta = float(np.linalg.norm(phi))
+    Omega = skew(phi)
+
+    if theta < 1e-8:
+        V_inv = np.eye(3) - 0.5 * Omega + (Omega @ Omega) / 12.0
+    else:
+        coefficient = (
+            1.0 / theta**2
+            - (1.0 + np.cos(theta)) / (2.0 * theta * np.sin(theta))
+        )
+        V_inv = np.eye(3) - 0.5 * Omega + coefficient * (Omega @ Omega)
+    return np.concatenate((V_inv @ T[:3, 3], phi))
+
+
 def make_transform(R: np.ndarray, t: np.ndarray) -> np.ndarray:
     """
     Build an SE(3) homogeneous transform:

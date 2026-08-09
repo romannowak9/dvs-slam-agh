@@ -7,16 +7,16 @@ from event_slam.calibration.kalibr_parser import (
 from event_slam.calibration.stereo_rectifier import StereoRectifier
 from event_slam.core.geometry import as_float_array
 from event_slam.datasets.evslam_reader import EvSlamRosbagReader
-from event_slam.debug.visualization import print_vo_frame
+from event_slam.debug.visualization import print_slam_frame
 from event_slam.events.event_aggregator import EventFrameAggregator
 from event_slam.events.event_filter import StereoBackgroundActivityFilter
 from event_slam.events.event_window import StereoEventWindowBuilder
-from event_slam.pipeline import EvSlamStereoVOPipeline
+from event_slam.pipeline import EvSlamPipeline
 from event_slam.slam.stereo_pnp import StereoPnPSLAM
 
 
-def create_pipeline(config: dict) -> EvSlamStereoVOPipeline:
-    """Construct the configured modules and connect them into the VO pipeline."""
+def create_pipeline(config: dict) -> EvSlamPipeline:
+    """Construct the configured modules and connect the SLAM pipeline."""
     dataset_cfg = config.get("dataset", {})
     processing_cfg = config.get("processing", {})
     aggregation_cfg = config.get("aggregation", {})
@@ -153,7 +153,7 @@ def create_pipeline(config: dict) -> EvSlamStereoVOPipeline:
         imu_timestamps, imu_angular_velocities = reader.load_imu_gyro(topic=imu_topic)
         imu_time_offset = imu_calibration.time_offset or 0.0
 
-    return EvSlamStereoVOPipeline(
+    return EvSlamPipeline(
         window_builder=window_builder,
         aggregator=aggregator,
         rectifier=rectifier,
@@ -173,5 +173,5 @@ def create_pipeline(config: dict) -> EvSlamStereoVOPipeline:
         velocity_smoothing_poly_order=int(
             velocity_cfg.get("smoothing_poly_order", 2)
         ),
-        frame_callback=print_vo_frame,
+        frame_callback=print_slam_frame,
     )

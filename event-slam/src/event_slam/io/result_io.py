@@ -40,6 +40,7 @@ def save_outputs(pipeline, config: dict, interrupted: bool = False) -> tuple:
 
     keyframes_path = None
     landmarks_path = None
+    pose_graph_path = None
     sparse_map = pipeline.slam.map
     if sparse_map is not None:
         keyframes_path = _resolve_output_path(
@@ -52,6 +53,11 @@ def save_outputs(pipeline, config: dict, interrupted: bool = False) -> tuple:
         )
         write_keyframes_csv(sparse_map.keyframes, keyframes_path)
         write_landmarks_csv(sparse_map.landmarks.values(), landmarks_path)
+        pose_graph_path = _resolve_output_path(
+            output_dir,
+            output_cfg.get("pose_graph_csv", "pose_graph.csv"),
+        )
+        write_pose_graph_csv(pipeline.slam.pose_graph.edges, pose_graph_path)
 
     velocity_path = None
     if bool(velocity_cfg.get("enabled", False)):
@@ -88,6 +94,7 @@ def save_outputs(pipeline, config: dict, interrupted: bool = False) -> tuple:
         result_stats,
         keyframes_path,
         landmarks_path,
+        pose_graph_path,
     )
 
     if interrupted:
@@ -111,7 +118,10 @@ def write_vo_csv(results, path) -> None:
             "pnp_imu_rotation_error_deg,imu_rotation_consistent,"
             "imu_rejected,message,pose_source,map_point_count,"
             "map_inlier_count,local_landmark_count,"
-            "map_descriptor_match_count,map_message,new_feature_count\n"
+            "map_descriptor_match_count,map_message,new_feature_count,"
+            "tracking_state,reference_keyframe_id,is_keyframe,"
+            "loop_candidate_count,loop_candidate_id,loop_match_count,"
+            "loop_accepted,relocalized,graph_cost_before,graph_cost_after\n"
         )
 
         for result in results:
@@ -140,7 +150,17 @@ def write_vo_csv(results, path) -> None:
                 f"{result.local_landmark_count},"
                 f"{result.map_descriptor_match_count},"
                 f"{_csv_safe(result.map_message)},"
-                f"{result.new_feature_count}\n"
+                f"{result.new_feature_count},"
+                f"{result.tracking_state},"
+                f"{result.reference_keyframe_id},"
+                f"{int(result.is_keyframe)},"
+                f"{result.loop_candidate_count},"
+                f"{result.loop_candidate_id},"
+                f"{result.loop_match_count},"
+                f"{int(result.loop_accepted)},"
+                f"{int(result.relocalized)},"
+                f"{result.graph_cost_before:.9f},"
+                f"{result.graph_cost_after:.9f}\n"
             )
 
 
@@ -197,6 +217,28 @@ def write_landmarks_csv(landmarks, path) -> None:
                 f"{x_W[0]:.9f},{x_W[1]:.9f},{x_W[2]:.9f},"
                 f"{landmark.observation_count},"
                 f"{landmark.last_seen_keyframe_id}\n"
+            )
+
+
+def write_pose_graph_csv(edges, path) -> None:
+    """Write sequential and loop pose-graph constraints."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with path.open("w", encoding="utf-8") as file:
+        file.write(
+            "source_id,target_id,type,tx,ty,tz,qx,qy,qz,qw,"
+            "inlier_count,reprojection_error_median\n"
+        )
+        for edge in edges:
+            T = edge.T_C_source_C_target
+            t = T[:3, 3]
+            qx, qy, qz, qw = rotmat_to_quat_xyzw(T[:3, :3])
+            file.write(
+                f"{edge.source_id},{edge.target_id},{edge.edge_type},"
+                f"{t[0]:.9f},{t[1]:.9f},{t[2]:.9f},"
+                f"{qx:.9f},{qy:.9f},{qz:.9f},{qw:.9f},"
+                f"{edge.inlier_count},{edge.reprojection_error_median:.9f}\n"
             )
 
 
@@ -450,7 +492,7 @@ def _interpolate_world_velocities(
 
 def _print_summary(summary) -> None:
     print()
-    print("VO summary")
+    print("SLAM summary")
     print("=" * 80)
     print(f"processed_frames: {summary.processed_frames}")
     print(f"successful_steps: {summary.successful_steps}")
@@ -463,6 +505,10 @@ def _print_summary(summary) -> None:
     print(f"imu_rejected_steps: {summary.imu_rejected_steps}")
     print(f"keyframes: {summary.keyframe_count}")
     print(f"landmarks: {summary.landmark_count}")
+    print(f"accepted_loops: {summary.accepted_loop_count}")
+    print(f"relocalizations: {summary.relocalization_count}")
+    print(f"graph_cost_before: {format_value(summary.graph_cost_before)}")
+    print(f"graph_cost_after: {format_value(summary.graph_cost_after)}")
     print(
         "final_position: "
         f"[{summary.final_position[0]:.6f}, "
@@ -478,6 +524,7 @@ def _print_saved_outputs(
     result_stats,
     keyframes_path,
     landmarks_path,
+    pose_graph_path,
 ) -> None:
     print()
     print("Saved outputs")
@@ -500,6 +547,7 @@ def _print_saved_outputs(
     if keyframes_path is not None:
         print(f"keyframes_csv: {keyframes_path}")
         print(f"landmarks_csv: {landmarks_path}")
+        print(f"pose_graph_csv: {pose_graph_path}")
 
 
 def _resolve_output_path(output_dir: Path, path_value) -> Path:
