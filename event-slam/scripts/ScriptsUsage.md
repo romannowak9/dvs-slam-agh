@@ -177,7 +177,6 @@ python3 scripts/verification/debug_feature_tracking.py \
   --baf-time-window 0.005 \
   --baf-radius 2 \
   --baf-min-neighbors 5 \
-  --min-features 250 \
   --detector gftt \
   --t-start 970 \
   --num-frames 10
@@ -205,7 +204,6 @@ python3 scripts/verification/debug_stereo_depth.py \
   --baf-time-window 0.005 \
   --baf-radius 2 \
   --baf-min-neighbors 5 \
-  --min-features 250 \
   --max-draw-matches 40 \
   --detector gftt \
   --epipolar-threshold 2.0 \

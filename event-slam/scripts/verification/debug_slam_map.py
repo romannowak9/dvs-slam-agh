@@ -160,7 +160,13 @@ class SlamMapVisualizer:
         """Plot map correspondences and the selected pose source per frame."""
         results = self.pipeline.slam.results
         frames = np.arange(len(results))
-        sources = {"none": 0, "vo_fallback": 1, "map": 2, "initialization": 3}
+        sources = {
+            "none": 0,
+            "vo_fallback": 1,
+            "map": 2,
+            "relocalization": 3,
+            "initialization": 4,
+        }
 
         figure, axes = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
         axes[0].plot(frames, [r.track_count for r in results], label="tracked features")

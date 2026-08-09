@@ -87,7 +87,6 @@ def main() -> None:
 
     tracker = FeatureTracker(
         detector=args.detector,
-        min_features=args.min_features,
         max_features=args.max_features,
         fast_threshold=args.fast_threshold,
     )
@@ -217,7 +216,6 @@ def parse_args() -> argparse.Namespace:
         choices=[mode.value for mode in FeatureDetectorMode],
     )
 
-    parser.add_argument("--min-features", default=250, type=int)
     parser.add_argument("--max-features", default=1000, type=int)
     parser.add_argument("--fast-threshold", default=25, type=int)
 

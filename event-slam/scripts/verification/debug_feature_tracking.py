@@ -85,7 +85,6 @@ def main() -> None:
 
     tracker = FeatureTracker(
         detector=args.detector,
-        min_features=args.min_features,
         max_features=args.max_features,
         fast_threshold=args.fast_threshold,
         use_forward_backward_check=args.forward_backward_check,
@@ -146,8 +145,7 @@ def main() -> None:
             f"frame {frame_index:05d}: "
             f"tracks={result.track_count}, "
             f"active={result.active_count}, "
-            f"redetected={result.redetected}, "
-            f"detected={result.detected_count}, "
+            f"added={result.detected_count}, "
             f"t=[{window.t_start:.9f}, {window.t_end:.9f})"
         )
 
@@ -207,7 +205,6 @@ def parse_args() -> argparse.Namespace:
         choices=[mode.value for mode in FeatureDetectorMode],
     )
 
-    parser.add_argument("--min-features", default=250, type=int)
     parser.add_argument("--max-features", default=1000, type=int)
     parser.add_argument("--fast-threshold", default=25, type=int)
 
@@ -230,7 +227,7 @@ def draw_stats(image: np.ndarray, result) -> None:
     text = (
         f"tracks={result.track_count} "
         f"active={result.active_count} "
-        f"redetect={int(result.redetected)}"
+        f"added={result.detected_count}"
     )
     draw_text_bar(image, text)
 
