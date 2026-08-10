@@ -41,6 +41,7 @@ class SparseMap:
         self.keyframes = []
         self.landmarks = {}
         self.track_to_landmark = {}
+        self.unconfirmed_landmark_ids = set()
         self.next_landmark_id = 0
 
     @property
@@ -68,6 +69,15 @@ class SparseMap:
         for track_id, landmark_id in zip(track_ids, landmark_ids):
             self.track_to_landmark[int(track_id)] = int(landmark_id)
 
+    def retain_tracks(self, track_ids: np.ndarray) -> None:
+        """Discard associations for tracks that can never become active again."""
+        active = {int(track_id) for track_id in track_ids}
+        self.track_to_landmark = {
+            track_id: landmark_id
+            for track_id, landmark_id in self.track_to_landmark.items()
+            if track_id in active
+        }
+
     def prune_landmarks(self, recent_keyframes: int = 5) -> int:
         """Remove unconfirmed landmarks outside the recent keyframe window."""
         if len(self.keyframes) <= recent_keyframes:
@@ -76,29 +86,28 @@ class SparseMap:
         oldest_recent_id = self.keyframes[-int(recent_keyframes)].id
         removed_ids = {
             landmark_id
-            for landmark_id, landmark in self.landmarks.items()
-            if landmark.observation_count < 2
-            and landmark.anchor_keyframe_id < oldest_recent_id
+            for landmark_id in self.unconfirmed_landmark_ids
+            if self.landmarks[landmark_id].anchor_keyframe_id < oldest_recent_id
         }
         if not removed_ids:
             return 0
 
+        affected_keyframes = {}
         for landmark_id in removed_ids:
-            del self.landmarks[landmark_id]
+            landmark = self.landmarks.pop(landmark_id)
+            affected_keyframes.setdefault(landmark.anchor_keyframe_id, set()).add(
+                landmark_id
+            )
+        self.unconfirmed_landmark_ids.difference_update(removed_ids)
 
         self.track_to_landmark = {
             track_id: landmark_id
             for track_id, landmark_id in self.track_to_landmark.items()
             if landmark_id not in removed_ids
         }
-        for keyframe in self.keyframes:
-            keep = np.asarray(
-                [
-                    int(landmark_id) not in removed_ids
-                    for landmark_id in keyframe.landmark_ids
-                ],
-                dtype=bool,
-            )
+        for keyframe_id, landmark_ids in affected_keyframes.items():
+            keyframe = self.keyframes[keyframe_id]
+            keep = ~np.isin(keyframe.landmark_ids, list(landmark_ids))
             keyframe.points_2d = keyframe.points_2d[keep]
             keyframe.points_C = keyframe.points_C[keep]
             keyframe.descriptors = keyframe.descriptors[keep]
@@ -165,10 +174,13 @@ class SparseMap:
                     observation_count=1,
                     last_seen_keyframe_id=keyframe_id,
                 )
+                self.unconfirmed_landmark_ids.add(landmark_id)
                 self.track_to_landmark[track_id] = landmark_id
             else:
                 landmark = self.landmarks[landmark_id]
                 observation_count = landmark.observation_count + 1
+                if observation_count == 2:
+                    self.unconfirmed_landmark_ids.discard(landmark_id)
                 landmark.position_W += (
                     positions_W[index] - landmark.position_W
                 ) / observation_count

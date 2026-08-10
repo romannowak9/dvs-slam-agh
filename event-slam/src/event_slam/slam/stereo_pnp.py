@@ -240,6 +240,8 @@ class StereoPnPSLAM:
         Process one rectified stereo pair.
         """
         tracking_result = self.tracker.process(left_rectified)
+        if self.map is not None:
+            self.map.retain_tracks(tracking_result.active_ids)
 
         if not self.initialized:
             points_3d, depth_count = self._compute_depth_for_active_points(
@@ -696,6 +698,11 @@ class StereoPnPSLAM:
         return points_3d, depth_result.stats.triangulated_count
 
     def _append_result(self, result: StereoPnPSLAMResult) -> None:
+        if self.results:
+            previous = self.results[-1]
+            previous.tracked_points_curr = empty_points(2)
+            previous.pnp_points_curr = empty_points(2)
+            previous.pnp_inlier_points_curr = empty_points(2)
         self.trajectory.append(
             timestamp=result.timestamp,
             pose=Pose.from_matrix(result.T_W_Cleft),

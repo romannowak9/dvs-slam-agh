@@ -114,7 +114,7 @@ class EventFrameAggregator:
 
         linear_idx, last_event_idx = self._last_event_per_pixel(batch, mask)
 
-        p = batch.p[mask][last_event_idx]
+        p = batch.p[last_event_idx]
 
         image_flat = image.reshape(-1)
 
@@ -144,8 +144,8 @@ class EventFrameAggregator:
 
         linear_idx, last_event_idx = self._last_event_per_pixel(batch, mask)
 
-        t = batch.t[mask][last_event_idx]
-        p = batch.p[mask][last_event_idx]
+        t = batch.t[last_event_idx]
+        p = batch.p[last_event_idx]
 
         age = np.maximum(0.0, float(t_ref) - t)
         weight = np.exp(-age / self.tau)
@@ -164,20 +164,15 @@ class EventFrameAggregator:
         batch: EventBatch,
         mask: np.ndarray,
     ) -> tuple:
-        x = batch.x[mask].astype(np.int64)
-        y = batch.y[mask].astype(np.int64)
-
-        linear_idx = y * self.width + x
-
-        _, reversed_unique_idx = np.unique(
-            linear_idx[::-1],
-            return_index=True,
+        event_indices = np.flatnonzero(mask)
+        linear_idx = (
+            batch.y[event_indices].astype(np.int64) * self.width
+            + batch.x[event_indices]
         )
-
-        last_event_idx = linear_idx.size - 1 - reversed_unique_idx
-        last_linear_idx = linear_idx[last_event_idx]
-
-        return last_linear_idx, last_event_idx
+        last_event_idx = np.full(self.height * self.width, -1, dtype=np.int64)
+        np.maximum.at(last_event_idx, linear_idx, event_indices)
+        pixels = np.flatnonzero(last_event_idx >= 0)
+        return pixels, last_event_idx[pixels]
 
     def _valid_event_mask(self, batch: EventBatch) -> np.ndarray:
         mask = (

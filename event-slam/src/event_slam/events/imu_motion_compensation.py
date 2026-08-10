@@ -140,22 +140,16 @@ def compensate_event_batch_rotation(
         camera=camera,
     )
 
-    warped_x = np.empty(input_count, dtype=np.int64)
-    warped_y = np.empty(input_count, dtype=np.int64)
+    warped_x = np.empty(input_count, dtype=np.int32)
+    warped_y = np.empty(input_count, dtype=np.int32)
     valid = np.zeros(input_count, dtype=bool)
 
-    bin_indices = _make_time_bins(
-        timestamps=batch.t,
-        num_time_bins=num_time_bins,
-    )
-
-    for bin_id in np.unique(bin_indices):
-        mask = bin_indices == bin_id
-
-        if not np.any(mask):
+    bin_boundaries = _make_time_bin_boundaries(batch.t, num_time_bins)
+    for start, end in zip(bin_boundaries[:-1], bin_boundaries[1:]):
+        if start == end:
             continue
 
-        event_time = float(np.mean(batch.t[mask]))
+        event_time = float(np.mean(batch.t[start:end]))
 
         R_Cref_Cevent = imu_rotation_between_camera_times(
             imu_timestamps=imu_timestamps,
@@ -169,20 +163,20 @@ def compensate_event_batch_rotation(
         )
 
         x_bin, y_bin, valid_bin = _warp_rays_to_pixels(
-            rays=rays[mask],
+            rays=rays[start:end],
             R_Cref_Cevent=R_Cref_Cevent,
             camera=camera,
         )
 
-        warped_x[mask] = x_bin
-        warped_y[mask] = y_bin
-        valid[mask] = valid_bin
+        warped_x[start:end] = x_bin
+        warped_y[start:end] = y_bin
+        valid[start:end] = valid_bin
 
     output_batch = EventBatch(
         x=warped_x[valid],
         y=warped_y[valid],
-        t=batch.t[valid].copy(),
-        p=batch.p[valid].copy(),
+        t=batch.t[valid],
+        p=batch.p[valid],
         camera=batch.camera
     )
 
@@ -226,16 +220,13 @@ def _events_to_rays(
     y: np.ndarray,
     camera: CameraModel,
 ) -> np.ndarray:
-    x = np.asarray(x, dtype=np.float64)
-    y = np.asarray(y, dtype=np.float64)
-
-    return np.column_stack(
-        (
-            (x - camera.cx) / camera.fx,
-            (y - camera.cy) / camera.fy,
-            np.ones_like(x, dtype=np.float64),
-        )
-    )
+    rays = np.empty((len(x), 3), dtype=np.float64)
+    rays[:, 0] = x
+    rays[:, 0] = (rays[:, 0] - camera.cx) / camera.fx
+    rays[:, 1] = y
+    rays[:, 1] = (rays[:, 1] - camera.cy) / camera.fy
+    rays[:, 2] = 1.0
+    return rays
 
 
 def _warp_rays_to_pixels(
@@ -266,22 +257,22 @@ def _warp_rays_to_pixels(
     return x, y, valid
 
 
-def _make_time_bins(
+def _make_time_bin_boundaries(
     timestamps: np.ndarray,
     num_time_bins: int,
 ) -> np.ndarray:
+    """Return slice boundaries for chronologically ordered event timestamps."""
     timestamps = np.asarray(timestamps, dtype=np.float64).reshape(-1)
 
     if len(timestamps) == 0:
-        return np.empty(0, dtype=np.int64)
+        return np.zeros(2, dtype=np.int64)
 
-    t_min = float(np.min(timestamps))
-    t_max = float(np.max(timestamps))
+    t_min = float(timestamps[0])
+    t_max = float(timestamps[-1])
 
     if t_max <= t_min or num_time_bins <= 1:
-        return np.zeros(len(timestamps), dtype=np.int64)
+        return np.array([0, len(timestamps)], dtype=np.int64)
 
-    edges = np.linspace(t_min, t_max, num_time_bins + 1)
-    indices = np.searchsorted(edges, timestamps, side="right") - 1
-
-    return np.clip(indices, 0, num_time_bins - 1).astype(np.int64)
+    edges = np.linspace(t_min, t_max, num_time_bins + 1)[1:-1]
+    boundaries = np.searchsorted(timestamps, edges, side="left")
+    return np.concatenate(([0], boundaries, [len(timestamps)])).astype(np.int64)
