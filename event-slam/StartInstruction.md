@@ -54,11 +54,15 @@ Attach VSCode to running container and source:
 ```bash
 source /opt/ros/noetic/setup.bash
 cd /workspace/event-slam
+apt-get install -y --no-install-recommends python3-pip
+python3 -m pip install --no-deps scipy==1.7.3
 ```
+
+`--no-deps` keeps the container's NumPy 1.17.4 unchanged.
 
 # Trajectory estimation
 
 ```bash
-python3 scripts/run_evslam_vo.py \
-  --config configs/evslam_seq007_test_imu.yaml
+python3 scripts/run_evslam_slam.py \
+  --config configs/evslam_seq007_test_slam.yaml
 ```
