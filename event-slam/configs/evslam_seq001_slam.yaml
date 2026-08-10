@@ -1,13 +1,13 @@
 dataset:
-  bag_path: /data/evSLAM/seq007_test.bag
+  bag_path: /data/evSLAM/seq001.bag
   left_event_topic: /dvxplorer_left/events
   right_event_topic: /dvxplorer_right/events
-  camera_yaml: /data/evSLAM/mecanum_calibration/calib_results_cam_others.yaml
-  reference_timestamps_path: /data/evSLAM/ref/seq_007_test_ref_time.txt
+  camera_yaml: /data/evSLAM/drone_calibration/calib_results_cam_drone.yaml
+  reference_timestamps_path: /data/evSLAM/ref/seq001_ref_time.txt
 
 imu:
   enabled: true
-  calibration_yaml: /data/evSLAM/mecanum_calibration/calib_results_imu_others.yaml
+  calibration_yaml: /data/evSLAM/drone_calibration/calib_results_imu_drone.yaml
   topic: /dvxplorer_left/imu
 
   motion_compensation:
@@ -35,14 +35,14 @@ baf:
   enabled: true
   time_window: 0.01
   radius: 2
-  min_neighbors: 7
+  min_neighbors: 5
 
 rectification:
   alpha: 0.0
   interpolation: nearest
 
 feature_tracker:
-  detector: gftt  # or fast
+  detector: gftt
   max_features: 1000
   fast_threshold: 25
   forward_backward_check: false
@@ -67,8 +67,8 @@ pnp:
   pnp_iterations: 100
   R_output_from_pnp_camera:
     - [1.0, 0.0, 0.0]
-    - [0.0, -1.0, 0.0]
-    - [0.0, 0.0, -1.0]
+    - [0.0, 1.0, 0.0]
+    - [0.0, 0.0, 1.0]
 
 slam:
   enabled: true
@@ -111,9 +111,9 @@ velocity:
   smoothing_poly_order: 2
 
 output:
-  output_dir: outputs/evslam_seq007_slam_final
+  output_dir: outputs/evslam_seq001_slam
   trajectory_csv: trajectory.csv
-  result_txt: result_seq007.txt
+  result_txt: result_seq001.txt
   keyframes_csv: keyframes.csv
   landmarks_csv: landmarks.csv
   pose_graph_csv: pose_graph.csv
