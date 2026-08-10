@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from scipy.optimize import least_squares
+from scipy.sparse import lil_matrix
 
 from event_slam.core.geometry import (
     invert_transform,
@@ -42,6 +43,7 @@ class PoseGraph:
         max_evaluations: int = 100,
     ) -> None:
         self.edges = []
+        self._inverse_measurements = []
         self.weights = np.array(
             [translation_weight] * 3 + [rotation_weight] * 3,
             dtype=np.float64,
@@ -69,6 +71,9 @@ class PoseGraph:
             reprojection_error_median=float(reprojection_error_median),
         )
         self.edges.append(edge)
+        self._inverse_measurements.append(
+            invert_transform(edge.T_C_source_C_target)
+        )
         return edge
 
     def optimize(self, keyframes) -> PoseGraphOptimization:
@@ -82,6 +87,7 @@ class PoseGraph:
             self._residuals,
             x0,
             args=(initial,),
+            jac_sparsity=self._jacobian_sparsity(len(initial)),
             loss="huber",
             f_scale=self.huber_scale,
             max_nfev=self.max_evaluations,
@@ -97,15 +103,31 @@ class PoseGraph:
 
     def _residuals(self, increments: np.ndarray, initial: list) -> np.ndarray:
         poses = self._apply_increments(increments, initial)
+        inverse_poses = [invert_transform(pose) for pose in poses]
         residuals = []
-        for edge in self.edges:
-            predicted = (
-                invert_transform(poses[edge.source_id])
-                @ poses[edge.target_id]
-            )
-            error = invert_transform(edge.T_C_source_C_target) @ predicted
+        for edge, inverse_measurement in zip(
+            self.edges,
+            self._inverse_measurements,
+        ):
+            predicted = inverse_poses[edge.source_id] @ poses[edge.target_id]
+            error = inverse_measurement @ predicted
             residuals.append(self.weights * se3_log(error))
         return np.concatenate(residuals)
+
+    def _jacobian_sparsity(self, pose_count: int):
+        """Return the two-pose block structure of the graph Jacobian."""
+        variable_count = 6 * (pose_count - 1)
+        sparsity = lil_matrix(
+            (6 * len(self.edges), variable_count),
+            dtype=np.int8,
+        )
+        for edge_index, edge in enumerate(self.edges):
+            rows = slice(6 * edge_index, 6 * (edge_index + 1))
+            for pose_id in (edge.source_id, edge.target_id):
+                if pose_id > 0:
+                    cols = slice(6 * (pose_id - 1), 6 * pose_id)
+                    sparsity[rows, cols] = 1
+        return sparsity.tocsr()
 
     @staticmethod
     def _apply_increments(increments: np.ndarray, initial: list) -> list:

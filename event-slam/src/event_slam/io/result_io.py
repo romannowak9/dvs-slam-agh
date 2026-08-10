@@ -121,7 +121,8 @@ def write_vo_csv(results, path) -> None:
             "map_descriptor_match_count,map_message,new_feature_count,"
             "tracking_state,reference_keyframe_id,is_keyframe,"
             "loop_candidate_count,loop_candidate_id,loop_match_count,"
-            "loop_accepted,relocalized,graph_cost_before,graph_cost_after\n"
+            "loop_accepted,relocalized,graph_cost_before,graph_cost_after,"
+            "loop_relative_scale\n"
         )
 
         for result in results:
@@ -160,7 +161,8 @@ def write_vo_csv(results, path) -> None:
                 f"{int(result.loop_accepted)},"
                 f"{int(result.relocalized)},"
                 f"{result.graph_cost_before:.9f},"
-                f"{result.graph_cost_after:.9f}\n"
+                f"{result.graph_cost_after:.9f},"
+                f"{result.loop_relative_scale:.9f}\n"
             )
 
 

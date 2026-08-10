@@ -59,6 +59,7 @@ class StereoPnPSLAMResult:
     loop_candidate_id: int = -1
     loop_match_count: int = 0
     loop_accepted: bool = False
+    loop_relative_scale: float = np.nan
     relocalized: bool = False
     graph_cost_before: float = np.nan
     graph_cost_after: float = np.nan

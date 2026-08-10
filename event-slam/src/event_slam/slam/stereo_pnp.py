@@ -142,6 +142,14 @@ class StereoPnPSLAM:
             loop_cfg.get("enabled", True)
         )
         self.loop_min_keyframe_gap = int(loop_cfg.get("min_keyframe_gap", 20))
+        self.loop_check_interval = max(
+            1,
+            int(loop_cfg.get("check_interval_keyframes", 5)),
+        )
+        self.loop_min_interval = max(
+            1,
+            int(loop_cfg.get("min_keyframes_between_loops", 10)),
+        )
         self.relocalization_enabled = self.slam_enabled and bool(
             relocalization_cfg.get("enabled", True)
         )
@@ -156,6 +164,7 @@ class StereoPnPSLAM:
         }
         self.place_recognizer = PlaceRecognizer(
             K=self.K,
+            R_Crect_C=self.T_Crect_C[:3, :3],
             motion_converter=self._rectified_candidate_to_output_motion,
             descriptor_ratio=loop_cfg.get("descriptor_ratio", 0.75),
             min_matches=loop_cfg.get("min_matches", 30),
@@ -164,6 +173,9 @@ class StereoPnPSLAM:
             min_inlier_ratio=loop_cfg.get("min_inlier_ratio", 0.3),
             max_reprojection_median=loop_cfg.get(
                 "max_reprojection_median", 3.0
+            ),
+            min_scale_error_reduction=loop_cfg.get(
+                "min_scale_error_reduction", 0.2
             ),
             pnp_reprojection_error=pnp_reprojection_error,
             pnp_confidence=pnp_confidence,
@@ -188,6 +200,7 @@ class StereoPnPSLAM:
         self.consecutive_failures = 0
         self.last_graph_cost_before = np.nan
         self.last_graph_cost_after = np.nan
+        self.last_loop_keyframe_id = -self.loop_min_interval
 
     def get_summary(self) -> StereoPnPSLAMSummary:
         inliers = [
@@ -332,7 +345,11 @@ class StereoPnPSLAM:
 
     def _try_loop_closure(self, keyframe, result: StereoPnPSLAMResult) -> None:
         last_candidate_id = keyframe.id - self.loop_min_keyframe_gap
-        if last_candidate_id < 0:
+        if (
+            last_candidate_id < 0
+            or keyframe.id % self.loop_check_interval
+            or keyframe.id < self.last_loop_keyframe_id + self.loop_min_interval
+        ):
             return
 
         recognition = self.place_recognizer.recognize(
@@ -340,6 +357,7 @@ class StereoPnPSLAM:
             descriptors=keyframe.descriptors,
             sparse_map=self.map,
             candidate_ids=range(last_candidate_id + 1),
+            points_C=keyframe.points_C,
         )
         result.loop_candidate_count = len(recognition.candidates)
         if recognition.candidates:
@@ -355,6 +373,8 @@ class StereoPnPSLAM:
         result.loop_candidate_id = candidate_id
         result.loop_match_count = verification.candidate.match_count
         result.loop_accepted = True
+        result.loop_relative_scale = verification.relative_scale
+        self.last_loop_keyframe_id = keyframe.id
         self.pose_graph.add_edge(
             candidate_id,
             keyframe.id,

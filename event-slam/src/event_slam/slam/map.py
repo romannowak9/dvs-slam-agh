@@ -96,7 +96,8 @@ class SparseMap:
                 [
                     int(landmark_id) not in removed_ids
                     for landmark_id in keyframe.landmark_ids
-                ]
+                ],
+                dtype=bool,
             )
             keyframe.points_2d = keyframe.points_2d[keep]
             keyframe.points_C = keyframe.points_C[keep]
@@ -109,9 +110,9 @@ class SparseMap:
         """Move anchored landmarks with their optimized keyframes."""
         for landmark in self.landmarks.values():
             anchor = self.keyframes[landmark.anchor_keyframe_id]
-            landmark.position_W = transform_points(
-                anchor.T_W_C,
-                landmark.position_C_anchor,
+            landmark.position_W = (
+                anchor.T_W_C[:3, :3] @ landmark.position_C_anchor
+                + anchor.T_W_C[:3, 3]
             )
 
     def update_landmark_positions(
