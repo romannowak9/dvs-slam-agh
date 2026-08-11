@@ -113,8 +113,31 @@ python3 scripts/evaluate_evslam_metrics.py \
 ## Main SLAM runner
 
 ```bash
-python3 scripts/run_evslam_slam.py \
+python3 scripts/run_event_slam.py \
   --config configs/evslam_seq007_test_slam.yaml
+```
+
+The same runner selects M3ED from `dataset.format: m3ed_h5`:
+
+```bash
+python3 scripts/run_event_slam.py \
+  --config configs/m3ed_falcon_fast_flight_2_slam.yaml
+```
+
+M3ED requires the system package `python3-h5py` documented in
+`StartInstruction.md`.
+
+Inspect reader throughput without running SLAM:
+
+```bash
+python3 scripts/verification/inspect_m3ed_h5.py
+```
+
+Validate and package the three official challenge files:
+
+```bash
+python3 scripts/package_m3ed_submission.py \
+  outputs/m3ed_challenge outputs/m3ed_submission.zip
 ```
 
 Debug images are written below `output.output_dir` from the selected YAML. Use
