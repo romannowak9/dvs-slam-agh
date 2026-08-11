@@ -54,7 +54,7 @@ Attach VSCode to running container and source:
 ```bash
 source /opt/ros/noetic/setup.bash
 cd /workspace/event-slam
-apt-get install -y --no-install-recommends python3-pip
+apt-get install -y --no-install-recommends python3-pip python3-h5py
 python3 -m pip install --no-deps scipy==1.7.3
 ```
 
@@ -63,6 +63,13 @@ python3 -m pip install --no-deps scipy==1.7.3
 # Trajectory estimation
 
 ```bash
-python3 scripts/run_evslam_slam.py \
+python3 scripts/run_event_slam.py \
   --config configs/evslam_seq007_test_slam.yaml
+```
+
+The same runner processes M3ED H5 without converting it to a ROS bag:
+
+```bash
+python3 scripts/run_event_slam.py \
+  --config configs/m3ed_falcon_fast_flight_2_slam.yaml
 ```
