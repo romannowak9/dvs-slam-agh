@@ -1,0 +1,16 @@
+M3ED trajectory metrics
+samples: 1631
+duration_s: 162.996692
+ATE_mean_m: 45.685845441
+ATE_RMSE_m: 51.664123551
+ATE_median_m: 39.924253170
+ATE_max_m: 103.491265871
+rotation_mean_deg: 92.330517805
+rotation_RMSE_deg: 100.546672192
+rotation_median_deg: 87.830726060
+rotation_max_deg: 179.935895712
+RPE_translation_RMSE_m: 0.318509521
+RPE_rotation_RMSE_deg: 3.791342748
+estimated_path_length_m: 445.981470203
+gt_path_length_m: 348.847919942
+path_length_ratio: 1.278440962

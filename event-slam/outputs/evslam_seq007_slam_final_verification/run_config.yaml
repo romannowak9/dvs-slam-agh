@@ -1,0 +1,109 @@
+dataset:
+  bag_path: /data/evSLAM/seq007_test.bag
+  left_event_topic: /dvxplorer_left/events
+  right_event_topic: /dvxplorer_right/events
+  camera_yaml: /data/evSLAM/mecanum_calibration/calib_results_cam_others.yaml
+  reference_timestamps_path: /data/evSLAM/ref/seq_007_test_ref_time.txt
+imu:
+  enabled: true
+  calibration_yaml: /data/evSLAM/mecanum_calibration/calib_results_imu_others.yaml
+  topic: /dvxplorer_left/imu
+  motion_compensation:
+    enabled: true
+    reference_time: middle
+    time_bins: 32
+  rotation_prior:
+    enabled: true
+    max_error_deg: 3.0
+    reject_bad_pnp: true
+processing:
+  time_window: 0.012
+  t_start: null
+  t_end: null
+  num_frames: 0
+aggregation:
+  mode: exponential
+  polarity_mode: both
+  tau: 0.012
+baf:
+  enabled: true
+  time_window: 0.01
+  radius: 2
+  min_neighbors: 7
+rectification:
+  alpha: 0.0
+  interpolation: nearest
+feature_tracker:
+  detector: gftt
+  max_features: 1000
+  fast_threshold: 25
+  forward_backward_check: false
+  fb_threshold: 1.0
+stereo_depth:
+  epipolar_threshold: 2.0
+  min_disparity: 0.5
+  max_disparity: 250.0
+  min_depth: 0.05
+  max_depth: 100.0
+pnp:
+  min_pnp_points: 15
+  min_pnp_inliers: 10
+  min_pnp_inlier_ratio: 0.15
+  max_pnp_reprojection_median: 3.0
+  max_translation_step: 0.5
+  max_rotation_step_deg: 15.0
+  pnp_reprojection_error: 3.0
+  pnp_confidence: 0.999
+  pnp_iterations: 100
+  R_output_from_pnp_camera:
+  - - 1.0
+    - 0.0
+    - 0.0
+  - - 0.0
+    - -1.0
+    - 0.0
+  - - 0.0
+    - 0.0
+    - -1.0
+slam:
+  enabled: true
+  min_frame_gap: 5
+  translation_depth_ratio: 0.15
+  rotation_deg: 10.0
+  tracked_landmark_ratio: 0.6
+  max_landmark_depth: 10.0
+  local_keyframes: 5
+  descriptor_ratio: 0.75
+  reprojection_gate_px: 15.0
+  loop_closure:
+    enabled: true
+    min_keyframe_gap: 20
+    check_interval_keyframes: 5
+    min_keyframes_between_loops: 10
+    descriptor_ratio: 0.75
+    min_matches: 30
+    max_candidates: 3
+    min_inliers: 20
+    min_inlier_ratio: 0.3
+    max_reprojection_median: 3.0
+    min_scale_error_reduction: 0.2
+  pose_graph:
+    translation_weight: 1.0
+    rotation_weight: 1.0
+    huber_scale: 1.0
+    max_evaluations: 100
+  relocalization:
+    enabled: true
+    failure_count: 3
+velocity:
+  enabled: true
+  output_csv: velocity.csv
+  smoothing_window: 5
+  smoothing_poly_order: 2
+output:
+  output_dir: outputs/evslam_seq007_slam_final_verification
+  trajectory_csv: trajectory.csv
+  result_txt: result_seq007.txt
+  keyframes_csv: keyframes.csv
+  landmarks_csv: landmarks.csv
+  pose_graph_csv: pose_graph.csv
