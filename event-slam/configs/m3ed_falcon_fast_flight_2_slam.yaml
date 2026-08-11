@@ -51,10 +51,10 @@ stereo_depth:
 
 pnp:
   min_pnp_points: 15
-  min_pnp_inliers: 10
-  min_pnp_inlier_ratio: 0.15
+  min_pnp_inliers: 20
+  min_pnp_inlier_ratio: 0.3
   max_pnp_reprojection_median: 3.0
-  max_translation_step: 0.5
+  max_translation_step: 0.08
   max_rotation_step_deg: 15.0
   pnp_reprojection_error: 3.0
   pnp_confidence: 0.999
