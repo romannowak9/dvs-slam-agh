@@ -87,6 +87,7 @@ def save_outputs(pipeline, config: dict, interrupted: bool = False) -> tuple:
                 reference_path=reference_path,
                 output_path=result_path,
                 sequence_name=sequence_name,
+                allow_partial=interrupted,
             )
         else:
             result_path = _resolve_output_path(
@@ -454,8 +455,9 @@ def write_m3ed_result_from_reference_file(
     reference_path,
     output_path,
     sequence_name: str,
+    allow_partial: bool = False,
 ) -> ResultWriterStats:
-    """Write strict eight-column M3ED output at all reference timestamps."""
+    """Write M3ED output, optionally limited to the available trajectory range."""
     timestamps = load_reference_timestamps(reference_path)
     _validate_reference_timestamps(timestamps)
     output_path = Path(output_path)
@@ -466,32 +468,53 @@ def write_m3ed_result_from_reference_file(
         )
     if trajectory.is_empty:
         raise ValueError("Cannot write M3ED result from an empty trajectory")
-    if (
-        timestamps[0] < trajectory.first().timestamp
-        or timestamps[-1] > trajectory.last().timestamp
-    ):
+    covered = (
+        (timestamps >= trajectory.first().timestamp)
+        & (timestamps <= trajectory.last().timestamp)
+    )
+    if not allow_partial and not np.all(covered):
         raise ValueError(
             "M3ED reference range is outside trajectory coverage: "
             f"[{timestamps[0]:.9f}, {timestamps[-1]:.9f}] not within "
             f"[{trajectory.first().timestamp:.9f}, {trajectory.last().timestamp:.9f}]"
         )
+    selected_timestamps = timestamps[covered] if allow_partial else timestamps
+    if len(selected_timestamps) == 0:
+        raise ValueError("Trajectory does not cover any M3ED reference timestamp")
 
-    data = trajectory.interpolate_many(timestamps, clamp=False).as_tum_array()
-    _validate_m3ed_array(data, timestamps)
+    data = trajectory_to_m3ed_array(trajectory.interpolate_many(
+        selected_timestamps,
+        clamp=False,
+    ))
+    _validate_m3ed_array(data, selected_timestamps)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     np.savetxt(output_path, data, fmt="%.9f")
     validate_m3ed_result_file(
         output_path,
         sequence_name=sequence_name,
-        reference_path=reference_path,
+        reference_path=None if allow_partial else reference_path,
     )
     return ResultWriterStats(
         reference_count=len(timestamps),
         written_count=len(data),
-        skipped_count=0,
-        first_written_timestamp=float(timestamps[0]),
-        last_written_timestamp=float(timestamps[-1]),
+        skipped_count=len(timestamps) - len(data),
+        first_written_timestamp=float(selected_timestamps[0]),
+        last_written_timestamp=float(selected_timestamps[-1]),
     )
+
+
+def trajectory_to_m3ed_array(trajectory: Trajectory) -> np.ndarray:
+    """Convert internal T_W_C poses to the orientation convention used by M3ED."""
+    data = trajectory.as_tum_array()
+    data[:, 4:7] *= -1.0
+    return data
+
+
+def trajectory_from_m3ed_array(data: np.ndarray) -> Trajectory:
+    """Convert M3ED positions and R_C_W quaternions to internal T_W_C poses."""
+    data = np.asarray(data, dtype=np.float64).copy()
+    data[:, 4:7] *= -1.0
+    return Trajectory.from_tum_array(data)
 
 
 def validate_m3ed_result_file(

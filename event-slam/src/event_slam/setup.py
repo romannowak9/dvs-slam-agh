@@ -86,6 +86,9 @@ def create_pipeline(config: dict) -> EvSlamPipeline:
             "max_disparity": stereo_depth_cfg.get("max_disparity", 250.0),
             "min_depth": float(stereo_depth_cfg.get("min_depth", 0.05)),
             "max_depth": stereo_depth_cfg.get("max_depth", 100.0),
+            "lr_consistency_threshold": stereo_depth_cfg.get(
+                "lr_consistency_threshold"
+            ),
         },
         min_pnp_points=int(pnp_cfg.get("min_pnp_points", 20)),
         min_pnp_inliers=int(pnp_cfg.get("min_pnp_inliers", 30)),

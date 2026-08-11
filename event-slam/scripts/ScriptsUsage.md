@@ -110,6 +110,33 @@ python3 scripts/evaluate_evslam_metrics.py \
   --output outputs/example/metrics.txt
 ```
 
+M3ED uses separate analysis scripts because its challenge files contain poses
+only (`timestamp tx ty tz qx qy qz qw`). The plotting script derives smoothed
+camera-frame velocities from both estimated and GT poses. It displays both
+trajectories directly in the official M3ED camera frame, without reordering
+axes. M3ED positions describe the camera in the initial-camera frame, while the
+published quaternion represents the inverse rotation; the M3ED scripts perform
+this conversion at the file boundary and use project-standard `T_W_C`
+internally.
+
+```bash
+python3 scripts/align_m3ed_result_to_gt.py \
+  --estimate outputs/example/falcon_outdoor_day_fast_flight_2.txt \
+  --gt /data/m3ed/gt/falcon_outdoor_day_fast_flight_2_pose_evo_gt.txt \
+  --output outputs/example/result_aligned_se3.txt \
+  --method se3
+
+python3 scripts/plot_m3ed_trajectory.py \
+  --trajectory outputs/example/result_aligned_se3.txt \
+  --gt /data/m3ed/gt/falcon_outdoor_day_fast_flight_2_pose_evo_gt.txt \
+  --output-dir outputs/example/plots_se3
+
+python3 scripts/evaluate_m3ed_metrics.py \
+  --estimate outputs/example/result_aligned_se3.txt \
+  --gt /data/m3ed/gt/falcon_outdoor_day_fast_flight_2_pose_evo_gt.txt \
+  --output outputs/example/metrics_se3.txt
+```
+
 ## Main SLAM runner
 
 ```bash
@@ -123,6 +150,11 @@ The same runner selects M3ED from `dataset.format: m3ed_h5`:
 python3 scripts/run_event_slam.py \
   --config configs/m3ed_falcon_fast_flight_2_slam.yaml
 ```
+
+An interrupted M3ED run still saves the trajectory, map diagnostics and a
+partial `<sequence_name>.txt`. The partial challenge file contains only the
+reference timestamps covered by the trajectory; a completed run remains strict
+and must cover every reference timestamp.
 
 M3ED requires the system package `python3-h5py` documented in
 `StartInstruction.md`.
