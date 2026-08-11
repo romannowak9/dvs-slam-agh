@@ -70,21 +70,36 @@ def save_outputs(pipeline, config: dict, interrupted: bool = False) -> tuple:
 
     result_path = None
     result_stats = None
+    dataset_format = dataset_cfg.get("format", "evslam_rosbag")
     reference_path = dataset_cfg.get("reference_timestamps_path")
-    if reference_path and len(pipeline.trajectory) == 0:
+    if dataset_format == "m3ed_h5" and reference_path is None:
+        raise ValueError("M3ED output requires dataset.reference_timestamps_path")
+    if reference_path and len(pipeline.trajectory) == 0 and dataset_format != "m3ed_h5":
         print("Skipping challenge result: trajectory is empty.")
     elif reference_path:
-        result_path = _resolve_output_path(
-            output_dir,
-            output_cfg.get("result_txt", "result.txt"),
-        )
-        result_stats = write_result_from_reference_file(
-            trajectory=pipeline.trajectory,
-            velocity=pipeline.velocity_trajectory,
-            reference_path=reference_path,
-            output_path=result_path,
-            skip_out_of_range=True,
-        )
+        if dataset_format == "m3ed_h5":
+            sequence_name = dataset_cfg.get("sequence_name")
+            if not sequence_name:
+                raise ValueError("M3ED output requires dataset.sequence_name")
+            result_path = output_dir / f"{sequence_name}.txt"
+            result_stats = write_m3ed_result_from_reference_file(
+                trajectory=pipeline.trajectory,
+                reference_path=reference_path,
+                output_path=result_path,
+                sequence_name=sequence_name,
+            )
+        else:
+            result_path = _resolve_output_path(
+                output_dir,
+                output_cfg.get("result_txt", "result.txt"),
+            )
+            result_stats = write_result_from_reference_file(
+                trajectory=pipeline.trajectory,
+                velocity=pipeline.velocity_trajectory,
+                reference_path=reference_path,
+                output_path=result_path,
+                skip_out_of_range=True,
+            )
 
     _print_summary(pipeline.get_summary())
     _print_saved_outputs(
@@ -432,6 +447,103 @@ def write_result_from_reference_file(
         output_path=output_path,
         skip_out_of_range=skip_out_of_range,
     )
+
+
+def write_m3ed_result_from_reference_file(
+    trajectory: Trajectory,
+    reference_path,
+    output_path,
+    sequence_name: str,
+) -> ResultWriterStats:
+    """Write strict eight-column M3ED output at all reference timestamps."""
+    timestamps = load_reference_timestamps(reference_path)
+    _validate_reference_timestamps(timestamps)
+    output_path = Path(output_path)
+    expected_name = f"{sequence_name}.txt"
+    if output_path.name != expected_name:
+        raise ValueError(
+            f"M3ED result must be named {expected_name}, got {output_path.name}"
+        )
+    if trajectory.is_empty:
+        raise ValueError("Cannot write M3ED result from an empty trajectory")
+    if (
+        timestamps[0] < trajectory.first().timestamp
+        or timestamps[-1] > trajectory.last().timestamp
+    ):
+        raise ValueError(
+            "M3ED reference range is outside trajectory coverage: "
+            f"[{timestamps[0]:.9f}, {timestamps[-1]:.9f}] not within "
+            f"[{trajectory.first().timestamp:.9f}, {trajectory.last().timestamp:.9f}]"
+        )
+
+    data = trajectory.interpolate_many(timestamps, clamp=False).as_tum_array()
+    _validate_m3ed_array(data, timestamps)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savetxt(output_path, data, fmt="%.9f")
+    validate_m3ed_result_file(
+        output_path,
+        sequence_name=sequence_name,
+        reference_path=reference_path,
+    )
+    return ResultWriterStats(
+        reference_count=len(timestamps),
+        written_count=len(data),
+        skipped_count=0,
+        first_written_timestamp=float(timestamps[0]),
+        last_written_timestamp=float(timestamps[-1]),
+    )
+
+
+def validate_m3ed_result_file(
+    path,
+    sequence_name: str = None,
+    reference_path=None,
+) -> np.ndarray:
+    """Validate one M3ED challenge file and optionally its reference times."""
+    path = Path(path)
+    if sequence_name is not None and path.name != f"{sequence_name}.txt":
+        raise ValueError(f"Expected M3ED result {sequence_name}.txt, got {path.name}")
+    try:
+        data = np.loadtxt(path, dtype=np.float64)
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"Could not read M3ED result: {path}") from exc
+    if data.ndim == 1:
+        data = data.reshape(1, -1)
+
+    reference_timestamps = None
+    if reference_path is not None:
+        reference_timestamps = load_reference_timestamps(reference_path)
+        _validate_reference_timestamps(reference_timestamps)
+    _validate_m3ed_array(data, reference_timestamps)
+    return data
+
+
+def _validate_reference_timestamps(timestamps: np.ndarray) -> None:
+    timestamps = np.asarray(timestamps, dtype=np.float64).reshape(-1)
+    if len(timestamps) == 0 or not np.all(np.isfinite(timestamps)):
+        raise ValueError("M3ED reference timestamps must be non-empty and finite")
+    if np.any(np.diff(timestamps) <= 0.0):
+        raise ValueError("M3ED reference timestamps must be strictly increasing")
+
+
+def _validate_m3ed_array(
+    data: np.ndarray,
+    reference_timestamps: np.ndarray = None,
+) -> None:
+    data = np.asarray(data, dtype=np.float64)
+    if data.ndim != 2 or data.shape[1] != 8 or len(data) == 0:
+        raise ValueError(f"M3ED result must be a non-empty Nx8 array, got {data.shape}")
+    if not np.all(np.isfinite(data)):
+        raise ValueError("M3ED result contains non-finite values")
+    if np.any(np.diff(data[:, 0]) <= 0.0):
+        raise ValueError("M3ED result timestamps must be strictly increasing")
+    quaternion_norms = np.linalg.norm(data[:, 4:8], axis=1)
+    if not np.allclose(quaternion_norms, 1.0, atol=1e-6):
+        raise ValueError("M3ED result quaternions must be non-zero and normalized")
+    if reference_timestamps is not None and not np.array_equal(
+        data[:, 0], np.asarray(reference_timestamps, dtype=np.float64)
+    ):
+        raise ValueError("M3ED result timestamps do not exactly match the reference")
 
 
 def _interpolate_valid_poses(

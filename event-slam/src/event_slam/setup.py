@@ -6,11 +6,9 @@ from event_slam.calibration.kalibr_parser import (
 )
 from event_slam.calibration.stereo_rectifier import StereoRectifier
 from event_slam.core.geometry import as_float_array
-from event_slam.datasets.evslam_reader import EvSlamRosbagReader
 from event_slam.debug.visualization import print_slam_frame
 from event_slam.events.event_aggregator import EventFrameAggregator
 from event_slam.events.event_filter import StereoBackgroundActivityFilter
-from event_slam.events.event_window import StereoEventWindowBuilder
 from event_slam.pipeline import EvSlamPipeline
 from event_slam.slam.stereo_pnp import StereoPnPSLAM
 
@@ -31,20 +29,11 @@ def create_pipeline(config: dict) -> EvSlamPipeline:
     slam_cfg = config.get("slam", {})
     velocity_cfg = config.get("velocity", {})
 
-    calibration = load_stereo_calibration(dataset_cfg["camera_yaml"])
+    dataset_format, calibration, reader, window_source = _create_input(
+        dataset_cfg,
+        processing_cfg,
+    )
     image_shape = calibration.left.image_shape
-    reader = EvSlamRosbagReader(
-        bag_path=dataset_cfg["bag_path"],
-        left_event_topic=dataset_cfg["left_event_topic"],
-        right_event_topic=dataset_cfg["right_event_topic"],
-    )
-    window_builder = StereoEventWindowBuilder.from_reader(
-        reader=reader,
-        time_window=float(processing_cfg.get("time_window", 0.007)),
-        t_start=processing_cfg.get("t_start"),
-        t_end=processing_cfg.get("t_end"),
-        drop_empty_windows=True,
-    )
     aggregator = EventFrameAggregator(
         image_shape=image_shape,
         mode=aggregation_cfg.get("mode", "exponential"),
@@ -131,30 +120,36 @@ def create_pipeline(config: dict) -> EvSlamPipeline:
     imu_time_offset = 0.0
 
     if motion_compensation_enabled or rotation_prior_enabled:
-        imu_yaml = (
-            imu_cfg.get("calibration_yaml")
-            or dataset_cfg.get("imu_yaml")
-            or dataset_cfg.get("imu_calibration")
-        )
-        if imu_yaml is None:
-            raise ValueError(
-                "IMU is enabled, but IMU calibration YAML was not provided. "
-                "Use imu.calibration_yaml or dataset.imu_yaml."
-            )
+        if dataset_format == "m3ed_h5":
+            from event_slam.calibration.m3ed_parser import load_m3ed_imu_calibration
 
-        imu_calibration = load_imu_calibration(imu_yaml)
-        imu_topic = imu_cfg.get("topic") or imu_calibration.topic
-        if imu_topic is None:
-            raise ValueError(
-                "IMU is enabled, but IMU topic was not provided and could not "
-                "be read from IMU calibration."
+            imu_calibration = load_m3ed_imu_calibration(dataset_cfg["path"])
+            imu_timestamps, imu_angular_velocities = reader.load_imu_gyro()
+        else:
+            imu_yaml = (
+                imu_cfg.get("calibration_yaml")
+                or dataset_cfg.get("imu_yaml")
+                or dataset_cfg.get("imu_calibration")
             )
-
-        imu_timestamps, imu_angular_velocities = reader.load_imu_gyro(topic=imu_topic)
+            if imu_yaml is None:
+                raise ValueError(
+                    "IMU is enabled, but IMU calibration YAML was not provided. "
+                    "Use imu.calibration_yaml or dataset.imu_yaml."
+                )
+            imu_calibration = load_imu_calibration(imu_yaml)
+            imu_topic = imu_cfg.get("topic") or imu_calibration.topic
+            if imu_topic is None:
+                raise ValueError(
+                    "IMU is enabled, but IMU topic was not provided and could not "
+                    "be read from IMU calibration."
+                )
+            imu_timestamps, imu_angular_velocities = reader.load_imu_gyro(
+                topic=imu_topic
+            )
         imu_time_offset = imu_calibration.time_offset or 0.0
 
     return EvSlamPipeline(
-        window_builder=window_builder,
+        window_builder=window_source,
         aggregator=aggregator,
         rectifier=rectifier,
         slam=slam,
@@ -175,3 +170,43 @@ def create_pipeline(config: dict) -> EvSlamPipeline:
         ),
         frame_callback=print_slam_frame,
     )
+
+
+def _create_input(dataset_cfg: dict, processing_cfg: dict) -> tuple:
+    dataset_format = dataset_cfg.get("format", "evslam_rosbag")
+    time_window = float(processing_cfg.get("time_window", 0.007))
+    window_args = {
+        "time_window": time_window,
+        "t_start": processing_cfg.get("t_start"),
+        "t_end": processing_cfg.get("t_end"),
+        "drop_empty_windows": True,
+    }
+
+    if dataset_format == "evslam_rosbag":
+        from event_slam.datasets.evslam_reader import EvSlamRosbagReader
+        from event_slam.events.event_window import StereoEventWindowBuilder
+
+        calibration = load_stereo_calibration(dataset_cfg["camera_yaml"])
+        reader = EvSlamRosbagReader(
+            bag_path=dataset_cfg["bag_path"],
+            left_event_topic=dataset_cfg["left_event_topic"],
+            right_event_topic=dataset_cfg["right_event_topic"],
+        )
+        window_source = StereoEventWindowBuilder.from_reader(
+            reader=reader,
+            **window_args,
+        )
+    elif dataset_format == "m3ed_h5":
+        from event_slam.calibration.m3ed_parser import load_m3ed_stereo_calibration
+        from event_slam.datasets.m3ed_reader import M3edH5Reader
+
+        calibration = load_m3ed_stereo_calibration(dataset_cfg["path"])
+        reader = M3edH5Reader(path=dataset_cfg["path"], **window_args)
+        window_source = reader
+    else:
+        raise ValueError(
+            f"Unsupported dataset.format {dataset_format!r}; expected "
+            "'evslam_rosbag' or 'm3ed_h5'"
+        )
+
+    return dataset_format, calibration, reader, window_source

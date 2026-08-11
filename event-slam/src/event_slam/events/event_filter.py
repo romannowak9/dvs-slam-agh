@@ -5,6 +5,10 @@ import numpy as np
 from event_slam.core.types import EventBatch, StereoEventWindow
 
 
+EVENT_CHUNK_SIZE = 2_000
+NO_EVENT = np.iinfo(np.int64).max
+
+
 class BackgroundActivityFilter:
     """
     Simple nearest-neighbor Background Activity Filter.
@@ -44,9 +48,26 @@ class BackgroundActivityFilter:
             -np.inf,
             dtype=np.float64,
         )
+        offsets = np.array(
+            [
+                (dx, dy)
+                for dy in range(-self.radius, self.radius + 1)
+                for dx in range(-self.radius, self.radius + 1)
+                if dx != 0 or dy != 0
+            ],
+            dtype=np.int64,
+        )
+        self.neighbor_dx = offsets[:, 0]
+        self.neighbor_dy = offsets[:, 1]
+        self.first_event_by_pixel = np.full(
+            self.height * self.width,
+            NO_EVENT,
+            dtype=np.int64,
+        )
 
     def reset(self) -> None:
         self.last_timestamp.fill(-np.inf)
+        self.first_event_by_pixel.fill(NO_EVENT)
 
     def filter(self, batch: EventBatch) -> EventBatch:
         """
@@ -57,20 +78,76 @@ class BackgroundActivityFilter:
         if len(batch) == 0:
             return EventBatch.empty(batch.camera)
 
+        inside = (
+            (batch.x >= 0)
+            & (batch.x < self.width)
+            & (batch.y >= 0)
+            & (batch.y < self.height)
+        )
+        event_indices = np.flatnonzero(inside)
         keep = np.zeros(len(batch), dtype=np.bool_)
+        if len(event_indices) == 0:
+            return EventBatch.empty(batch.camera)
 
-        for index in range(len(batch)):
-            x = int(batch.x[index])
-            y = int(batch.y[index])
-            t = float(batch.t[index])
+        x = batch.x[event_indices].astype(np.int64, copy=False)
+        y = batch.y[event_indices].astype(np.int64, copy=False)
+        t = batch.t[event_indices]
+        pixels = y.astype(np.int64) * self.width + x
+        timestamp_surface = self.last_timestamp.reshape(-1)
+        block_start = 0
 
-            if not self._is_inside_image(x, y):
-                continue
+        # Inside a block shorter than time_window, every earlier event is recent.
+        # Recording its first index per pixel reproduces the sequential filter
+        # while evaluating events in small NumPy chunks instead of a Python loop.
+        while block_start < len(event_indices):
+            block_end = np.searchsorted(
+                t,
+                t[block_start] + self.time_window,
+                side="left",
+            )
+            block_events = event_indices[block_start:block_end]
+            block_pixels = pixels[block_start:block_end]
+            np.minimum.at(
+                self.first_event_by_pixel,
+                block_pixels,
+                block_events,
+            )
 
-            if self._has_recent_neighbor(x, y, t):
-                keep[index] = True
+            for chunk_start in range(block_start, block_end, EVENT_CHUNK_SIZE):
+                chunk_end = min(chunk_start + EVENT_CHUNK_SIZE, block_end)
+                query_events = event_indices[chunk_start:chunk_end]
+                neighbor_x = x[chunk_start:chunk_end, None] + self.neighbor_dx
+                neighbor_y = y[chunk_start:chunk_end, None] + self.neighbor_dy
+                neighbor_inside = (
+                    (neighbor_x >= 0)
+                    & (neighbor_x < self.width)
+                    & (neighbor_y >= 0)
+                    & (neighbor_y < self.height)
+                )
+                neighbor_pixels = np.where(
+                    neighbor_inside,
+                    neighbor_y * self.width + neighbor_x,
+                    0,
+                )
+                recent = (
+                    timestamp_surface[neighbor_pixels]
+                    >= batch.t[query_events, None] - self.time_window
+                ) | (
+                    self.first_event_by_pixel[neighbor_pixels]
+                    < query_events[:, None]
+                )
+                keep[query_events] = np.count_nonzero(
+                    recent & neighbor_inside,
+                    axis=1,
+                ) >= self.min_neighbors
 
-            self.last_timestamp[y, x] = t
+            np.maximum.at(
+                timestamp_surface,
+                block_pixels,
+                batch.t[block_events],
+            )
+            self.first_event_by_pixel[block_pixels] = NO_EVENT
+            block_start = block_end
 
         return EventBatch(
             t=batch.t[keep],
@@ -79,28 +156,6 @@ class BackgroundActivityFilter:
             p=batch.p[keep],
             camera=batch.camera,
         )
-
-    def _has_recent_neighbor(self, x: int, y: int, timestamp: float) -> bool:
-        x0 = max(0, x - self.radius)
-        x1 = min(self.width, x + self.radius + 1)
-
-        y0 = max(0, y - self.radius)
-        y1 = min(self.height, y + self.radius + 1)
-
-        neighborhood = self.last_timestamp[y0:y1, x0:x1]
-        recent = neighborhood >= timestamp - self.time_window
-
-        center_y = y - y0
-        center_x = x - x0
-
-        if 0 <= center_y < recent.shape[0] and 0 <= center_x < recent.shape[1]:
-            recent = recent.copy()
-            recent[center_y, center_x] = False
-
-        return int(np.count_nonzero(recent)) >= self.min_neighbors
-
-    def _is_inside_image(self, x: int, y: int) -> bool:
-        return 0 <= x < self.width and 0 <= y < self.height
 
 
 class StereoBackgroundActivityFilter:

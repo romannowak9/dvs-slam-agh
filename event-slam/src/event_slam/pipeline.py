@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import islice
 import numpy as np
 
 from event_slam.core.imu import ImuCoverageError, imu_rotation_between_camera_times
@@ -96,10 +97,10 @@ class EvSlamPipeline:
         return self.slam.trajectory
 
     def run(self) -> EvSlamSummary:
-        for frame_index, window in enumerate(self.window_builder.iter_windows()):
-            if self.num_frames > 0 and len(self.slam.results) >= self.num_frames:
-                break
-
+        windows = self.window_builder.iter_windows()
+        if self.num_frames > 0:
+            windows = islice(windows, self.num_frames)
+        for frame_index, window in enumerate(windows):
             self.process_window(window, frame_index)
 
         return self.get_summary()

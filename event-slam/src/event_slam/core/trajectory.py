@@ -99,37 +99,42 @@ class Trajectory:
             If True, timestamps outside the trajectory range are clamped to the
             first or last pose. If False, an out-of-range timestamp raises ValueError.
         """
+        return self._interpolate(float(timestamp), self.timestamps, clamp)
+
+    def _interpolate(
+        self,
+        timestamp: float,
+        timestamps: np.ndarray,
+        clamp: bool,
+    ) -> Pose:
         if self.is_empty:
             raise ValueError("Cannot interpolate an empty trajectory")
 
-        timestamp = float(timestamp)
-        ts = self.timestamps
-
-        if timestamp < ts[0]:
+        if timestamp < timestamps[0]:
             if clamp:
                 return self.samples[0].pose.copy()
 
             raise ValueError(
-                f"Timestamp {timestamp} is before trajectory start {ts[0]}"
+                f"Timestamp {timestamp} is before trajectory start {timestamps[0]}"
             )
 
-        if timestamp > ts[-1]:
+        if timestamp > timestamps[-1]:
             if clamp:
                 return self.samples[-1].pose.copy()
 
             raise ValueError(
-                f"Timestamp {timestamp} is after trajectory end {ts[-1]}"
+                f"Timestamp {timestamp} is after trajectory end {timestamps[-1]}"
             )
 
-        idx = bisect_left(ts, timestamp)
+        idx = bisect_left(timestamps, timestamp)
 
         if idx == 0:
             return self.samples[0].pose.copy()
 
-        if idx < len(ts) and np.isclose(ts[idx], timestamp):
+        if idx < len(timestamps) and np.isclose(timestamps[idx], timestamp):
             return self.samples[idx].pose.copy()
 
-        if idx >= len(ts):
+        if idx >= len(timestamps):
             return self.samples[-1].pose.copy()
 
         sample0 = self.samples[idx - 1]
@@ -152,11 +157,12 @@ class Trajectory:
         Interpolate the trajectory at multiple timestamps.
         """
         output = Trajectory()
+        source_timestamps = self.timestamps
 
         for timestamp in np.asarray(timestamps, dtype=np.float64).reshape(-1):
             output.append(
                 float(timestamp),
-                self.interpolate(float(timestamp), clamp=clamp),
+                self._interpolate(float(timestamp), source_timestamps, clamp),
             )
 
         return output
