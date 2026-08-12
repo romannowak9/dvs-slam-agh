@@ -8,6 +8,17 @@ import numpy as np
 from event_slam.core.geometry import empty_points, invert_transform, transform_points
 
 
+def ratio_matches(matcher, query, train, ratio):
+    """Return the best KNN matches that pass Lowe's ratio test."""
+    if len(query) < 2 or len(train) < 2:
+        return []
+    return [
+        pair[0]
+        for pair in matcher.knnMatch(query, train, k=2)
+        if len(pair) == 2 and pair[0].distance < ratio * pair[1].distance
+    ]
+
+
 @dataclass
 class MapCorrespondences:
     object_points: np.ndarray = field(
@@ -148,18 +159,15 @@ class LocalMapMatcher:
             dtype=np.uint8,
         )
         candidates = []
-        for matches in self.matcher.knnMatch(
+        for best in ratio_matches(
+            self.matcher,
             query_descriptors,
             train_descriptors,
-            k=2,
+            self.descriptor_ratio,
         ):
-            if len(matches) < 2:
-                continue
-            best, second = matches
             point_index = int(query_indices[best.queryIdx])
             if (
-                best.distance < self.descriptor_ratio * second.distance
-                and np.linalg.norm(points[point_index] - projected[best.trainIdx])
+                np.linalg.norm(points[point_index] - projected[best.trainIdx])
                 <= self.reprojection_gate_px
             ):
                 candidates.append(

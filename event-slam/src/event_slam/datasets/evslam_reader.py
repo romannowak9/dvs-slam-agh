@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-from event_slam.core.imu import prepare_imu_gyro_samples
+from event_slam.core.imu import ImuData, prepare_imu_gyro_samples
 from event_slam.core.types import CameraId, EventBatch
 
 import rosbag
@@ -215,6 +215,24 @@ class EvSlamRosbagReader:
         return prepare_imu_gyro_samples(
             timestamps=np.asarray(timestamps, dtype=np.float64),
             angular_velocities=np.asarray(angular_velocities, dtype=np.float64),
+        )
+
+    def load_imu(self, topic: str | None = None) -> ImuData:
+        """Load the complete IMU stream once for visual-inertial estimation."""
+        imu_topic = self.imu_topic if topic is None else topic
+        samples = list(self.iter_imu_samples(topic=imu_topic))
+        if len(samples) < 2:
+            raise ValueError(
+                f"Need at least two IMU samples on topic {imu_topic}, got {len(samples)}"
+            )
+        return ImuData(
+            timestamps=np.asarray([sample.timestamp for sample in samples]),
+            angular_velocities=np.asarray(
+                [sample.angular_velocity for sample in samples]
+            ),
+            linear_accelerations=np.asarray(
+                [sample.linear_acceleration for sample in samples]
+            ),
         )
 
     def get_time_range(self) -> tuple[float, float]:

@@ -63,6 +63,16 @@ class StereoPnPSLAMResult:
     relocalized: bool = False
     graph_cost_before: float = np.nan
     graph_cost_after: float = np.nan
+    local_ba_success: bool = False
+    local_ba_cost_before: float = np.nan
+    local_ba_cost_after: float = np.nan
+    local_ba_landmark_count: int = 0
+    local_ba_visual_cost_before: float = np.nan
+    local_ba_visual_cost_after: float = np.nan
+    local_ba_imu_cost_before: float = np.nan
+    local_ba_imu_cost_after: float = np.nan
+    local_ba_evaluations: int = 0
+    local_ba_imu_factor_count: int = 0
 
 
 @dataclass

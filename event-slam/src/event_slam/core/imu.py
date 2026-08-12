@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from event_slam.core.geometry import (
@@ -11,6 +13,41 @@ from event_slam.core.geometry import (
 
 class ImuCoverageError(RuntimeError):
     """Requested camera interval is not covered by the available IMU data."""
+
+
+@dataclass
+class ImuData:
+    """Sorted, synchronized angular velocity and linear acceleration samples."""
+
+    timestamps: np.ndarray
+    angular_velocities: np.ndarray
+    linear_accelerations: np.ndarray
+
+    def __post_init__(self) -> None:
+        values = prepare_imu_samples(
+            self.timestamps,
+            self.angular_velocities,
+            self.linear_accelerations,
+        )
+        self.timestamps, self.angular_velocities, self.linear_accelerations = values
+
+    def interval(self, start_time: float, end_time: float) -> tuple:
+        """Return endpoint-interpolated samples covering one closed interval."""
+        if start_time < self.timestamps[0] or end_time > self.timestamps[-1]:
+            raise ImuCoverageError(
+                f"IMU interval [{start_time:.9f}, {end_time:.9f}] is outside "
+                f"[{self.timestamps[0]:.9f}, {self.timestamps[-1]:.9f}]"
+            )
+        times = _integration_times(self.timestamps, start_time, end_time)
+        return (
+            times,
+            _interpolate_vectors(
+                self.timestamps, self.angular_velocities, times
+            ),
+            _interpolate_vectors(
+                self.timestamps, self.linear_accelerations, times
+            ),
+        )
 
 
 def camera_time_to_imu_time(
@@ -278,6 +315,36 @@ def prepare_imu_gyro_samples(
     keep[1:] = np.diff(timestamps) > 0.0
 
     return timestamps[keep], angular_velocities[keep]
+
+
+def prepare_imu_samples(
+    timestamps: np.ndarray,
+    angular_velocities: np.ndarray,
+    linear_accelerations: np.ndarray,
+) -> tuple:
+    """Sort and deduplicate complete IMU samples without separating their rows."""
+    timestamps = np.asarray(timestamps, dtype=np.float64).reshape(-1)
+    angular_velocities = np.asarray(angular_velocities, dtype=np.float64)
+    linear_accelerations = np.asarray(linear_accelerations, dtype=np.float64)
+    expected = (len(timestamps), 3)
+    if angular_velocities.shape != expected or linear_accelerations.shape != expected:
+        raise ValueError(
+            "IMU angular velocity and acceleration must both have shape "
+            f"{expected}"
+        )
+
+    valid = (
+        np.isfinite(timestamps)
+        & np.all(np.isfinite(angular_velocities), axis=1)
+        & np.all(np.isfinite(linear_accelerations), axis=1)
+    )
+    order = np.argsort(timestamps[valid], kind="mergesort")
+    timestamps = timestamps[valid][order]
+    angular_velocities = angular_velocities[valid][order]
+    linear_accelerations = linear_accelerations[valid][order]
+    keep = np.ones(len(timestamps), dtype=bool)
+    keep[1:] = np.diff(timestamps) > 0.0
+    return timestamps[keep], angular_velocities[keep], linear_accelerations[keep]
 
 
 def _integration_times(

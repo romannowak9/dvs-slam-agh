@@ -8,6 +8,7 @@ from scipy.sparse import lil_matrix
 
 from event_slam.core.geometry import (
     invert_transform,
+    rotvec_to_rotmat,
     se3_exp,
     se3_log,
 )
@@ -50,6 +51,12 @@ class PoseGraph:
         )
         self.huber_scale = float(huber_scale)
         self.max_evaluations = int(max_evaluations)
+        self.gravity_axis = None
+
+    def align_with_gravity(self, gravity_W: np.ndarray) -> None:
+        """Restrict later graph corrections to translation and gravity-axis yaw."""
+        gravity_W = np.asarray(gravity_W, dtype=np.float64)
+        self.gravity_axis = gravity_W / np.linalg.norm(gravity_W)
 
     def add_edge(
         self,
@@ -81,7 +88,8 @@ class PoseGraph:
         if len(initial) < 2 or not self.edges:
             return PoseGraphOptimization(initial, 0.0, 0.0, 0, True)
 
-        x0 = np.zeros(6 * (len(initial) - 1), dtype=np.float64)
+        dimension = 4 if self.gravity_axis is not None else 6
+        x0 = np.zeros(dimension * (len(initial) - 1), dtype=np.float64)
         residual_before = self._residuals(x0, initial)
         result = least_squares(
             self._residuals,
@@ -111,30 +119,54 @@ class PoseGraph:
         ):
             predicted = inverse_poses[edge.source_id] @ poses[edge.target_id]
             error = inverse_measurement @ predicted
-            residuals.append(self.weights * se3_log(error))
+            error_vector = se3_log(error)
+            if self.gravity_axis is None:
+                residuals.append(self.weights * error_vector)
+            else:
+                axis_source = poses[edge.source_id][:3, :3].T @ self.gravity_axis
+                residuals.append(
+                    np.concatenate(
+                        (
+                            self.weights[:3] * error_vector[:3],
+                            [self.weights[3] * np.dot(error_vector[3:], axis_source)],
+                        )
+                    )
+                )
         return np.concatenate(residuals)
 
     def _jacobian_sparsity(self, pose_count: int):
         """Return the two-pose block structure of the graph Jacobian."""
-        variable_count = 6 * (pose_count - 1)
+        dimension = 4 if self.gravity_axis is not None else 6
+        variable_count = dimension * (pose_count - 1)
         sparsity = lil_matrix(
-            (6 * len(self.edges), variable_count),
+            (dimension * len(self.edges), variable_count),
             dtype=np.int8,
         )
         for edge_index, edge in enumerate(self.edges):
-            rows = slice(6 * edge_index, 6 * (edge_index + 1))
+            rows = slice(dimension * edge_index, dimension * (edge_index + 1))
             for pose_id in (edge.source_id, edge.target_id):
                 if pose_id > 0:
-                    cols = slice(6 * (pose_id - 1), 6 * pose_id)
+                    cols = slice(
+                        dimension * (pose_id - 1), dimension * pose_id
+                    )
                     sparsity[rows, cols] = 1
         return sparsity.tocsr()
 
-    @staticmethod
-    def _apply_increments(increments: np.ndarray, initial: list) -> list:
+    def _apply_increments(self, increments: np.ndarray, initial: list) -> list:
         poses = [initial[0].copy()]
         for index, pose in enumerate(initial[1:]):
-            delta = increments[6 * index : 6 * (index + 1)]
-            poses.append(pose @ se3_exp(delta))
+            if self.gravity_axis is None:
+                delta = increments[6 * index : 6 * (index + 1)]
+                poses.append(pose @ se3_exp(delta))
+            else:
+                delta = increments[4 * index : 4 * (index + 1)]
+                corrected = pose.copy()
+                corrected[:3, 3] += delta[:3]
+                corrected[:3, :3] = (
+                    rotvec_to_rotmat(self.gravity_axis * delta[3])
+                    @ pose[:3, :3]
+                )
+                poses.append(corrected)
         return poses
 
     def _huber_cost(self, residuals: np.ndarray) -> float:

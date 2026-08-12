@@ -138,7 +138,11 @@ def write_vo_csv(results, path) -> None:
             "tracking_state,reference_keyframe_id,is_keyframe,"
             "loop_candidate_count,loop_candidate_id,loop_match_count,"
             "loop_accepted,relocalized,graph_cost_before,graph_cost_after,"
-            "loop_relative_scale\n"
+            "loop_relative_scale,local_ba_success,local_ba_cost_before,"
+            "local_ba_cost_after,local_ba_landmark_count,"
+            "local_ba_visual_cost_before,local_ba_visual_cost_after,"
+            "local_ba_imu_cost_before,local_ba_imu_cost_after,"
+            "local_ba_evaluations,local_ba_imu_factor_count\n"
         )
 
         for result in results:
@@ -178,7 +182,17 @@ def write_vo_csv(results, path) -> None:
                 f"{int(result.relocalized)},"
                 f"{result.graph_cost_before:.9f},"
                 f"{result.graph_cost_after:.9f},"
-                f"{result.loop_relative_scale:.9f}\n"
+                f"{result.loop_relative_scale:.9f},"
+                f"{int(result.local_ba_success)},"
+                f"{result.local_ba_cost_before:.9f},"
+                f"{result.local_ba_cost_after:.9f},"
+                f"{result.local_ba_landmark_count},"
+                f"{result.local_ba_visual_cost_before:.9f},"
+                f"{result.local_ba_visual_cost_after:.9f},"
+                f"{result.local_ba_imu_cost_before:.9f},"
+                f"{result.local_ba_imu_cost_after:.9f},"
+                f"{result.local_ba_evaluations},"
+                f"{result.local_ba_imu_factor_count}\n"
             )
 
 
@@ -203,7 +217,8 @@ def write_keyframes_csv(keyframes, path) -> None:
 
     with path.open("w", encoding="utf-8") as file:
         file.write(
-            "id,frame_index,timestamp,tx,ty,tz,qx,qy,qz,qw,point_count\n"
+            "id,frame_index,timestamp,tx,ty,tz,qx,qy,qz,qw,point_count,"
+            "vx_O,vy_O,vz_O,bgx,bgy,bgz,bax,bay,baz\n"
         )
         for keyframe in keyframes:
             t = keyframe.T_W_C[:3, 3]
@@ -212,7 +227,18 @@ def write_keyframes_csv(keyframes, path) -> None:
                 f"{keyframe.id},{keyframe.frame_index},{keyframe.timestamp:.9f},"
                 f"{t[0]:.9f},{t[1]:.9f},{t[2]:.9f},"
                 f"{qx:.9f},{qy:.9f},{qz:.9f},{qw:.9f},"
-                f"{keyframe.point_count}\n"
+                f"{keyframe.point_count},"
+                + ",".join(
+                    f"{value:.9f}"
+                    for value in np.concatenate(
+                        (
+                            keyframe.velocity_O,
+                            keyframe.gyro_bias,
+                            keyframe.accel_bias,
+                        )
+                    )
+                )
+                + "\n"
             )
 
 
@@ -224,7 +250,8 @@ def write_landmarks_csv(landmarks, path) -> None:
     with path.open("w", encoding="utf-8") as file:
         file.write(
             "id,anchor_keyframe_id,x_anchor,y_anchor,z_anchor,"
-            "x_world,y_world,z_world,observation_count,last_seen_keyframe_id\n"
+            "x_world,y_world,z_world,observation_count,last_seen_keyframe_id,"
+            "inverse_depth,depth_uncertainty\n"
         )
         for landmark in sorted(landmarks, key=lambda item: item.id):
             x_C = landmark.position_C_anchor
@@ -234,7 +261,9 @@ def write_landmarks_csv(landmarks, path) -> None:
                 f"{x_C[0]:.9f},{x_C[1]:.9f},{x_C[2]:.9f},"
                 f"{x_W[0]:.9f},{x_W[1]:.9f},{x_W[2]:.9f},"
                 f"{landmark.observation_count},"
-                f"{landmark.last_seen_keyframe_id}\n"
+                f"{landmark.last_seen_keyframe_id},"
+                f"{landmark.inverse_depth:.9f},"
+                f"{landmark.depth_uncertainty:.9f}\n"
             )
 
 

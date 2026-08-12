@@ -7,7 +7,7 @@ import time
 import h5py
 import numpy as np
 
-from event_slam.core.imu import prepare_imu_gyro_samples
+from event_slam.core.imu import ImuData, prepare_imu_gyro_samples
 from event_slam.core.types import CameraId, EventBatch, StereoEventWindow
 
 
@@ -129,6 +129,25 @@ class M3edH5Reader:
         return prepare_imu_gyro_samples(
             timestamps_us.astype(np.float64) / MICROSECONDS_PER_SECOND,
             omega,
+        )
+
+    def load_imu(self) -> ImuData:
+        """Load the small synchronized M3ED IMU stream, including acceleration."""
+        with _open_h5(self.path) as h5_file:
+            _validate_version(h5_file)
+            paths = ("ovc/imu/ts", "ovc/imu/omega", "ovc/imu/accel")
+            _require_paths(h5_file, paths)
+            timestamps_us = np.asarray(h5_file[paths[0]][()], dtype=np.int64)
+            omega = np.asarray(h5_file[paths[1]][()], dtype=np.float64)
+            accel = np.asarray(h5_file[paths[2]][()], dtype=np.float64)
+        if timestamps_us.ndim != 1 or omega.shape != (len(timestamps_us), 3):
+            raise ValueError("Invalid M3ED gyroscope stream dimensions")
+        if accel.shape != (len(timestamps_us), 3):
+            raise ValueError("Invalid M3ED accelerometer stream dimensions")
+        return ImuData(
+            timestamps=timestamps_us.astype(np.float64) / MICROSECONDS_PER_SECOND,
+            angular_velocities=omega,
+            linear_accelerations=accel,
         )
 
     def get_time_range(self) -> tuple:

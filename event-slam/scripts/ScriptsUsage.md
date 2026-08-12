@@ -135,6 +135,11 @@ python3 scripts/evaluate_m3ed_metrics.py \
   --estimate outputs/example/result_aligned_se3.txt \
   --gt /data/m3ed/gt/falcon_outdoor_day_fast_flight_2_pose_evo_gt.txt \
   --output outputs/example/metrics_se3.txt
+
+python3 scripts/plot_m3ed_trajectory.py \
+  --trajectory outputs/m3ed_falcon_fast_flight_2_slam_vio_final/falcon_outdoor_day_fast_flight_2.txt \
+  --gt /data/m3ed/gt/falcon_outdoor_day_fast_flight_2_pose_evo_gt.txt \
+  --output-dir outputs/m3ed_falcon_fast_flight_2_slam_vio_final/plots
 ```
 
 ## Main SLAM runner

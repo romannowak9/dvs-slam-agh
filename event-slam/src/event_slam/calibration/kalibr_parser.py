@@ -20,6 +20,10 @@ class ImuCalibration:
     topic: Optional[str] = None
     time_offset: Optional[float] = None
     T_imu_body: Optional[np.ndarray] = None
+    gyroscope_noise_density: float = 1.7e-4
+    gyroscope_random_walk: float = 2.0e-5
+    accelerometer_noise_density: float = 2.0e-3
+    accelerometer_random_walk: float = 3.0e-3
 
 
 def load_stereo_calibration(camera_yaml_path) -> StereoCalibration:
@@ -103,6 +107,18 @@ def load_imu_calibration(imu_yaml_path) -> ImuCalibration:
         topic=_optional_string(imu_data, "rostopic"),
         time_offset=time_offset,
         T_imu_body=T_imu_body,
+        gyroscope_noise_density=float(
+            imu_data.get("gyroscope_noise_density", 1.7e-4)
+        ),
+        gyroscope_random_walk=float(
+            imu_data.get("gyroscope_random_walk", 2.0e-5)
+        ),
+        accelerometer_noise_density=float(
+            imu_data.get("accelerometer_noise_density", 2.0e-3)
+        ),
+        accelerometer_random_walk=float(
+            imu_data.get("accelerometer_random_walk", 3.0e-3)
+        ),
     )
 
 

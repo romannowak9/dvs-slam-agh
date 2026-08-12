@@ -64,6 +64,40 @@ def create_pipeline(config: dict) -> EvSlamPipeline:
             "R_output_from_pnp_camera",
         )
 
+    imu_enabled = bool(imu_cfg.get("enabled", False))
+    motion_compensation_enabled = imu_enabled and bool(
+        motion_compensation_cfg.get("enabled", False)
+    )
+    rotation_prior_enabled = imu_enabled and bool(
+        rotation_prior_cfg.get("enabled", False)
+    )
+    vio_enabled = imu_enabled and bool(
+        slam_cfg.get("visual_inertial", {}).get("enabled", False)
+    )
+    imu_data = None
+    imu_calibration = None
+    imu_time_offset = 0.0
+    if motion_compensation_enabled or rotation_prior_enabled or vio_enabled:
+        if dataset_format == "m3ed_h5":
+            from event_slam.calibration.m3ed_parser import load_m3ed_imu_calibration
+
+            imu_calibration = load_m3ed_imu_calibration(dataset_cfg["path"])
+            imu_data = reader.load_imu()
+        else:
+            imu_yaml = (
+                imu_cfg.get("calibration_yaml")
+                or dataset_cfg.get("imu_yaml")
+                or dataset_cfg.get("imu_calibration")
+            )
+            if imu_yaml is None:
+                raise ValueError("IMU calibration YAML is required when IMU is enabled")
+            imu_calibration = load_imu_calibration(imu_yaml)
+            imu_topic = imu_cfg.get("topic") or imu_calibration.topic
+            if imu_topic is None:
+                raise ValueError("IMU topic is missing from config and calibration")
+            imu_data = reader.load_imu(topic=imu_topic)
+        imu_time_offset = imu_calibration.time_offset or 0.0
+
     slam = StereoPnPSLAM(
         K=rectifier.K_left_rectified,
         P1=rectifier.P1,
@@ -89,6 +123,9 @@ def create_pipeline(config: dict) -> EvSlamPipeline:
             "lr_consistency_threshold": stereo_depth_cfg.get(
                 "lr_consistency_threshold"
             ),
+            "disparity_uncertainty": float(
+                stereo_depth_cfg.get("disparity_uncertainty", 1.0)
+            ),
         },
         min_pnp_points=int(pnp_cfg.get("min_pnp_points", 20)),
         min_pnp_inliers=int(pnp_cfg.get("min_pnp_inliers", 30)),
@@ -109,47 +146,15 @@ def create_pipeline(config: dict) -> EvSlamPipeline:
             rotation_prior_cfg.get("reject_bad_pnp", False)
         ),
         slam_params=slam_cfg,
+        imu_data=imu_data,
+        imu_calibration=imu_calibration,
+        T_C_imu=calibration.T_C_left_imu,
     )
 
-    imu_enabled = bool(imu_cfg.get("enabled", False))
-    motion_compensation_enabled = imu_enabled and bool(
-        motion_compensation_cfg.get("enabled", False)
+    imu_timestamps = imu_data.timestamps if imu_data is not None else None
+    imu_angular_velocities = (
+        imu_data.angular_velocities if imu_data is not None else None
     )
-    rotation_prior_enabled = imu_enabled and bool(
-        rotation_prior_cfg.get("enabled", False)
-    )
-    imu_timestamps = None
-    imu_angular_velocities = None
-    imu_time_offset = 0.0
-
-    if motion_compensation_enabled or rotation_prior_enabled:
-        if dataset_format == "m3ed_h5":
-            from event_slam.calibration.m3ed_parser import load_m3ed_imu_calibration
-
-            imu_calibration = load_m3ed_imu_calibration(dataset_cfg["path"])
-            imu_timestamps, imu_angular_velocities = reader.load_imu_gyro()
-        else:
-            imu_yaml = (
-                imu_cfg.get("calibration_yaml")
-                or dataset_cfg.get("imu_yaml")
-                or dataset_cfg.get("imu_calibration")
-            )
-            if imu_yaml is None:
-                raise ValueError(
-                    "IMU is enabled, but IMU calibration YAML was not provided. "
-                    "Use imu.calibration_yaml or dataset.imu_yaml."
-                )
-            imu_calibration = load_imu_calibration(imu_yaml)
-            imu_topic = imu_cfg.get("topic") or imu_calibration.topic
-            if imu_topic is None:
-                raise ValueError(
-                    "IMU is enabled, but IMU topic was not provided and could not "
-                    "be read from IMU calibration."
-                )
-            imu_timestamps, imu_angular_velocities = reader.load_imu_gyro(
-                topic=imu_topic
-            )
-        imu_time_offset = imu_calibration.time_offset or 0.0
 
     return EvSlamPipeline(
         window_builder=window_source,

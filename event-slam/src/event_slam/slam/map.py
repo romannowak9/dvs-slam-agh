@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -13,10 +13,19 @@ class Keyframe:
     frame_index: int
     timestamp: float
     T_W_C: np.ndarray
+    T_O_C: np.ndarray
     points_2d: np.ndarray
+    points_2d_right: np.ndarray
     points_C: np.ndarray
+    depth_uncertainties: np.ndarray
     descriptors: np.ndarray
     landmark_ids: np.ndarray
+    retrieval_descriptors: np.ndarray = field(
+        default_factory=lambda: np.empty((0, 32), dtype=np.uint8)
+    )
+    velocity_O: np.ndarray = field(default_factory=lambda: np.zeros(3))
+    gyro_bias: np.ndarray = field(default_factory=lambda: np.zeros(3))
+    accel_bias: np.ndarray = field(default_factory=lambda: np.zeros(3))
 
     @property
     def point_count(self) -> int:
@@ -32,6 +41,8 @@ class Landmark:
     descriptor: np.ndarray
     observation_count: int
     last_seen_keyframe_id: int
+    inverse_depth: float
+    depth_uncertainty: float
 
 
 class SparseMap:
@@ -109,7 +120,9 @@ class SparseMap:
             keyframe = self.keyframes[keyframe_id]
             keep = ~np.isin(keyframe.landmark_ids, list(landmark_ids))
             keyframe.points_2d = keyframe.points_2d[keep]
+            keyframe.points_2d_right = keyframe.points_2d_right[keep]
             keyframe.points_C = keyframe.points_C[keep]
+            keyframe.depth_uncertainties = keyframe.depth_uncertainties[keep]
             keyframe.descriptors = keyframe.descriptors[keep]
             keyframe.landmark_ids = keyframe.landmark_ids[keep]
 
@@ -143,16 +156,24 @@ class SparseMap:
                 invert_transform(anchor.T_W_C),
                 position_W.reshape(1, 3),
             )[0]
+            landmark.inverse_depth = 1.0 / np.linalg.norm(
+                landmark.position_C_anchor
+            )
 
     def add_keyframe(
         self,
         frame_index: int,
         timestamp: float,
         T_W_C: np.ndarray,
+        T_O_C: np.ndarray,
         points_2d: np.ndarray,
+        points_2d_right: np.ndarray,
         points_C: np.ndarray,
+        inverse_depths: np.ndarray,
+        depth_uncertainties: np.ndarray,
         descriptors: np.ndarray,
         track_ids: np.ndarray,
+        retrieval_descriptors: np.ndarray,
     ) -> Keyframe:
         keyframe_id = len(self.keyframes)
         positions_W = transform_points(T_W_C, points_C)
@@ -173,6 +194,8 @@ class SparseMap:
                     descriptor=descriptors[index].copy(),
                     observation_count=1,
                     last_seen_keyframe_id=keyframe_id,
+                    inverse_depth=float(inverse_depths[index]),
+                    depth_uncertainty=float(depth_uncertainties[index]),
                 )
                 self.unconfirmed_landmark_ids.add(landmark_id)
                 self.track_to_landmark[track_id] = landmark_id
@@ -189,9 +212,14 @@ class SparseMap:
                     invert_transform(anchor.T_W_C),
                     landmark.position_W.reshape(1, 3),
                 )[0]
+                landmark.inverse_depth = 1.0 / np.linalg.norm(
+                    landmark.position_C_anchor
+                )
                 landmark.descriptor = descriptors[index].copy()
                 landmark.observation_count = observation_count
                 landmark.last_seen_keyframe_id = keyframe_id
+                if depth_uncertainties[index] < landmark.depth_uncertainty:
+                    landmark.depth_uncertainty = float(depth_uncertainties[index])
 
             landmark_ids[index] = landmark_id
 
@@ -200,10 +228,18 @@ class SparseMap:
             frame_index=int(frame_index),
             timestamp=float(timestamp),
             T_W_C=np.asarray(T_W_C, dtype=np.float64).copy(),
+            T_O_C=np.asarray(T_O_C, dtype=np.float64).copy(),
             points_2d=np.asarray(points_2d, dtype=np.float32).copy(),
+            points_2d_right=np.asarray(points_2d_right, dtype=np.float32).copy(),
             points_C=np.asarray(points_C, dtype=np.float64).copy(),
+            depth_uncertainties=np.asarray(
+                depth_uncertainties, dtype=np.float64
+            ).copy(),
             descriptors=np.asarray(descriptors, dtype=np.uint8).copy(),
             landmark_ids=landmark_ids,
+            retrieval_descriptors=np.asarray(
+                retrieval_descriptors, dtype=np.uint8
+            ).copy(),
         )
         self.keyframes.append(keyframe)
         return keyframe

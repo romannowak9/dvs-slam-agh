@@ -43,6 +43,7 @@ class StereoDepthResult:
     valid_mask: np.ndarray
     epipolar_error: np.ndarray
     disparity: np.ndarray
+    depth_uncertainty: np.ndarray
     stats: StereoDepthStats
 
 
@@ -67,6 +68,7 @@ class StereoDepthEstimator:
         lk_win_size: tuple = (21, 21),
         lk_max_level: int = 3,
         lr_consistency_threshold: float | None = None,
+        disparity_uncertainty: float = 1.0,
     ) -> None:
         self.P1 = as_float_array(P1, (3, 4), "P1")
         self.P2 = as_float_array(P2, (3, 4), "P2")
@@ -81,6 +83,8 @@ class StereoDepthEstimator:
             if lr_consistency_threshold is None
             else float(lr_consistency_threshold)
         )
+        self.disparity_uncertainty = float(disparity_uncertainty)
+        self.focal_baseline = abs(float(self.P2[0, 3] - self.P1[0, 3]))
 
         self.lk_params = {
             "winSize": tuple(lk_win_size),
@@ -189,6 +193,13 @@ class StereoDepthEstimator:
         final_left = left_xy[final_indices]
         final_right = right_xy[final_indices]
         final_points_3d = points_3d[depth_mask]
+        depth_uncertainty = np.full(input_count, np.nan, dtype=np.float64)
+        valid_disparity = disparity[final_indices]
+        depth_uncertainty[final_indices] = (
+            self.focal_baseline
+            * self.disparity_uncertainty
+            / np.maximum(valid_disparity**2, 1e-12)
+        )
 
         stats = _make_stats(
             input_count=input_count,
@@ -204,6 +215,7 @@ class StereoDepthEstimator:
             valid_mask=valid_mask,
             epipolar_error=epipolar_error,
             disparity=disparity,
+            depth_uncertainty=depth_uncertainty,
             stats=stats,
         )
 
@@ -258,6 +270,7 @@ class StereoDepthEstimator:
             valid_mask=np.zeros(input_count, dtype=np.bool_),
             epipolar_error=epipolar_error,
             disparity=disparity,
+            depth_uncertainty=np.full(input_count, np.nan, dtype=np.float64),
             stats=StereoDepthStats(input_count=input_count),
         )
 

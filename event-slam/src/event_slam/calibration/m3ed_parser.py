@@ -47,11 +47,18 @@ def load_m3ed_stereo_calibration(path) -> StereoCalibration:
 
 
 def load_m3ed_imu_calibration(path) -> ImuCalibration:
-    """Return the synchronized M3ED IMU metadata used by the current frontend."""
+    """Return synchronized M3ED IMU metadata and conservative noise defaults."""
     with _open_h5(path) as h5_file:
         _validate_version(h5_file)
         _load_transform(h5_file, "ovc/imu/calib/T_to_prophesee_left")
-    return ImuCalibration(topic="/ovc/imu", time_offset=0.0)
+    return ImuCalibration(
+        topic="/ovc/imu",
+        time_offset=0.0,
+        gyroscope_noise_density=1.7e-4,
+        gyroscope_random_walk=2.0e-5,
+        accelerometer_noise_density=2.0e-3,
+        accelerometer_random_walk=3.0e-3,
+    )
 
 
 def _load_camera(h5_file, side: str) -> CameraModel:
