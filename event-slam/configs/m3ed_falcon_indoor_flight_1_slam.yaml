@@ -2,7 +2,7 @@ dataset:
   format: m3ed_h5
   path: /data/m3ed/falcon_indoor_flight_1_data.h5
   sequence_name: falcon_indoor_flight_1
-  reference_timestamps_path: outputs/m3ed_falcon_indoor_flight_1_slam/falcon_indoor_flight_1_pose_evo_gt.txt
+  reference_timestamps_path: /data/m3ed/gt/falcon_indoor_flight_1_pose_evo_gt.txt
 
 imu:
   enabled: true
