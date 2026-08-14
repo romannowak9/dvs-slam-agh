@@ -111,6 +111,7 @@ class StereoPnPSLAM:
         slam_params = slam_params or {}
         self.slam_enabled = bool(slam_params.get("enabled", False))
         self.keyframe_min_frame_gap = int(slam_params.get("min_frame_gap", 5))
+        self.keyframe_max_frame_gap = int(slam_params.get("max_frame_gap", 30))
         self.keyframe_translation_depth_ratio = float(
             slam_params.get("translation_depth_ratio", 0.15)
         )
@@ -142,10 +143,8 @@ class StereoPnPSLAM:
             loop_cfg.get("enabled", True)
         )
         self.loop_min_keyframe_gap = int(loop_cfg.get("min_keyframe_gap", 20))
-        self.loop_check_interval = max(
-            1,
-            int(loop_cfg.get("check_interval_keyframes", 5)),
-        )
+        self.loop_candidates_per_frame = int(loop_cfg.get("candidates_per_frame", 15))
+        self.loop_candidate_check_index = 0
         self.loop_min_interval = max(
             1,
             int(loop_cfg.get("min_keyframes_between_loops", 10)),
@@ -347,18 +346,41 @@ class StereoPnPSLAM:
 
     def _try_loop_closure(self, keyframe, result: StereoPnPSLAMResult) -> None:
         last_candidate_id = keyframe.id - self.loop_min_keyframe_gap
-        if (
-            last_candidate_id < 0
-            or keyframe.id % self.loop_check_interval
-            or keyframe.id < self.last_loop_keyframe_id + self.loop_min_interval
-        ):
+        if last_candidate_id < 0:
             return
+
+        if keyframe.id < self.last_loop_keyframe_id + self.loop_min_interval:
+            return
+
+        num_candidates = last_candidate_id + 1
+
+        current_pos = result.T_W_Cleft[:3, 3]
+        distances = []
+        for cid in range(num_candidates):
+            cand_pos = self.map.keyframes[cid].T_W_C[:3, 3]
+            distances.append((float(np.linalg.norm(cand_pos - current_pos)), cid))
+
+        distances.sort()
+        spatial_candidates = [cid for _, cid in distances[:self.loop_candidates_per_frame]]
+
+        round_robin_count = self.loop_candidates_per_frame // 2
+        start_idx = self.loop_candidate_check_index % num_candidates
+        end_idx = start_idx + round_robin_count
+
+        if end_idx <= num_candidates:
+            rr_candidates = list(range(start_idx, end_idx))
+            self.loop_candidate_check_index = end_idx
+        else:
+            rr_candidates = list(range(start_idx, num_candidates)) + list(range(0, end_idx - num_candidates))
+            self.loop_candidate_check_index = end_idx - num_candidates
+
+        candidate_ids = list(set(spatial_candidates + rr_candidates))
 
         recognition = self.place_recognizer.recognize(
             points_2d=keyframe.points_2d,
             descriptors=keyframe.descriptors,
             sparse_map=self.map,
-            candidate_ids=range(last_candidate_id + 1),
+            candidate_ids=candidate_ids,
             points_C=keyframe.points_C,
         )
         result.loop_candidate_count = len(recognition.candidates)
@@ -424,6 +446,9 @@ class StereoPnPSLAM:
 
         if frame_index - last_keyframe.frame_index < self.keyframe_min_frame_gap:
             return False
+
+        if frame_index - last_keyframe.frame_index >= self.keyframe_max_frame_gap:
+            return True
 
         T_Clast_C = invert_transform(last_keyframe.T_W_C) @ self.T_W_Cleft
         translation = float(np.linalg.norm(T_Clast_C[:3, 3]))
