@@ -77,16 +77,15 @@ slam:
 
   loop_closure:
     enabled: true
-    min_keyframe_gap: 20
-    check_interval_keyframes: 5
+    min_keyframe_gap: 30
     min_keyframes_between_loops: 10
-    descriptor_ratio: 0.75
+    descriptor_ratio: 0.85
+    max_features: 1500
     min_matches: 30
     max_candidates: 3
     min_inliers: 20
     min_inlier_ratio: 0.3
     max_reprojection_median: 3.0
-    min_scale_error_reduction: 0.2
 
   pose_graph:
     translation_weight: 1.0
@@ -105,7 +104,7 @@ velocity:
   smoothing_poly_order: 2
 
 output:
-  output_dir: outputs/m3ed_falcon_fast_flight_2_slam
+  output_dir: outputs/m3ed_falcon_fast_flight_2_slam_loop_fix
   trajectory_csv: trajectory.csv
   keyframes_csv: keyframes.csv
   landmarks_csv: landmarks.csv

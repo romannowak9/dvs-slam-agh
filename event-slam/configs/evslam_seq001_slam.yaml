@@ -84,7 +84,6 @@ slam:
   loop_closure:
     enabled: true
     min_keyframe_gap: 20
-    check_interval_keyframes: 5
     min_keyframes_between_loops: 10
     descriptor_ratio: 0.75
     min_matches: 30
@@ -92,7 +91,6 @@ slam:
     min_inliers: 20
     min_inlier_ratio: 0.3
     max_reprojection_median: 3.0
-    min_scale_error_reduction: 0.2
 
   pose_graph:
     translation_weight: 1.0
