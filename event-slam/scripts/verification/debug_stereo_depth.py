@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 
@@ -19,19 +18,11 @@ if SRC_PATH.exists():
 
 from event_slam.calibration.kalibr_parser import load_stereo_calibration
 from event_slam.calibration.stereo_rectifier import StereoRectifier
-from event_slam.datasets.evslam_reader import (
-    DEFAULT_LEFT_EVENT_TOPIC,
-    DEFAULT_RIGHT_EVENT_TOPIC,
-    EvSlamRosbagReader,
-)
-from event_slam.events.event_aggregator import (
-    EventFrameAggregator,
-    EventFrameMode,
-    PolarityMode,
-)
+from event_slam.datasets.evslam_reader import EvSlamRosbagReader
+from event_slam.events.event_aggregator import EventFrameAggregator
 from event_slam.events.event_filter import StereoBackgroundActivityFilter
 from event_slam.events.event_window import StereoEventWindowBuilder
-from event_slam.vo.feature_tracker import FeatureDetectorMode, FeatureTracker
+from event_slam.vo.feature_tracker import FeatureTracker
 from event_slam.vo.stereo_depth import StereoDepthEstimator
 
 from event_slam.debug.visualization import (
@@ -43,10 +34,11 @@ from event_slam.debug.visualization import (
     save_image,
     show_image,
 )
+from verification_config import load_args, verification_parser
 
 
 def main() -> None:
-    args = parse_args()
+    _, args = parse_args()
 
     if not args.display:
         output_dir = Path(args.output_dir)
@@ -87,7 +79,6 @@ def main() -> None:
 
     tracker = FeatureTracker(
         detector=args.detector,
-        min_features=args.min_features,
         max_features=args.max_features,
         fast_threshold=args.fast_threshold,
     )
@@ -173,75 +164,6 @@ def main() -> None:
         print(f"output_dir: {output_dir}")
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Debug sparse stereo matching and triangulation on event frames."
-    )
-
-    parser.add_argument("--bag", required=True, type=Path)
-    parser.add_argument("--camera-yaml", required=True, type=Path)
-
-    parser.add_argument("--left-topic", default=DEFAULT_LEFT_EVENT_TOPIC)
-    parser.add_argument("--right-topic", default=DEFAULT_RIGHT_EVENT_TOPIC)
-
-    parser.add_argument("--time-window", default=0.0333333333, type=float)
-    parser.add_argument("--num-frames", default=100, type=int, help="Number of frames to process. Use 0 to process the whole bag.",)
-
-    parser.add_argument(
-        "--mode",
-        default=EventFrameMode.STANDARD.value,
-        choices=[mode.value for mode in EventFrameMode],
-    )
-
-    parser.add_argument(
-        "--polarity-mode",
-        default=PolarityMode.BOTH.value,
-        choices=[mode.value for mode in PolarityMode],
-    )
-
-    parser.add_argument("--tau", default=0.03, type=float)
-
-    parser.add_argument("--use-baf", action="store_true")
-    parser.add_argument("--baf-time-window", default=1.0 / 24.0, type=float)
-    parser.add_argument("--baf-radius", default=2, type=int)
-    parser.add_argument("--baf-min-neighbors", default=1, type=int)
-
-    parser.add_argument("--t-start", default=None, type=float)
-    parser.add_argument("--t-end", default=None, type=float)
-
-    parser.add_argument("--alpha", default=0.0, type=float)
-
-    parser.add_argument(
-        "--detector",
-        default=FeatureDetectorMode.FAST.value,
-        choices=[mode.value for mode in FeatureDetectorMode],
-    )
-
-    parser.add_argument("--min-features", default=250, type=int)
-    parser.add_argument("--max-features", default=1000, type=int)
-    parser.add_argument("--fast-threshold", default=25, type=int)
-
-    parser.add_argument("--epipolar-threshold", default=2.0, type=float)
-    parser.add_argument("--min-disparity", default=0.5, type=float)
-    parser.add_argument("--max-disparity", default=250.0, type=float)
-
-    parser.add_argument("--min-depth", default=0.05, type=float)
-    parser.add_argument("--max-depth", default=100.0, type=float)
-
-    parser.add_argument("--max-draw-matches", default=200, type=int)
-
-    parser.add_argument("--display", action="store_true")
-    parser.add_argument("--display-delay-ms", default=1, type=int)
-
-    parser.add_argument(
-        "--output-dir",
-        default="outputs/debug_stereo_depth",
-        type=Path,
-    )
-
-    return parser.parse_args()
-
-
 def make_debug_image(
     left_gray: np.ndarray,
     right_gray: np.ndarray,
@@ -288,6 +210,16 @@ def print_frame_stats(frame_index: int, window, tracking_result, depth_result) -
         f"z_med={format_value(stats.depth_median)}, "
         f"t=[{window.t_start:.9f}, {window.t_end:.9f})"
     )
+
+
+def parse_args() -> tuple:
+    parser = verification_parser(
+        "Debug sparse stereo matching and triangulation on event frames."
+    )
+    parser.add_argument("--max-draw-matches", default=200, type=int)
+    parser.add_argument("--display", action="store_true")
+    parser.add_argument("--display-delay-ms", default=1, type=int)
+    return load_args(parser)
 
 
 if __name__ == "__main__":

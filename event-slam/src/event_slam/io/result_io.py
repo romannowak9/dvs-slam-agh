@@ -36,7 +36,28 @@ def save_outputs(pipeline, config: dict, interrupted: bool = False) -> tuple:
         output_dir,
         output_cfg.get("trajectory_csv", "trajectory.csv"),
     )
-    write_vo_csv(pipeline.vo.results, trajectory_path)
+    write_vo_csv(pipeline.slam.results, trajectory_path)
+
+    keyframes_path = None
+    landmarks_path = None
+    pose_graph_path = None
+    sparse_map = pipeline.slam.map
+    if sparse_map is not None:
+        keyframes_path = _resolve_output_path(
+            output_dir,
+            output_cfg.get("keyframes_csv", "keyframes.csv"),
+        )
+        landmarks_path = _resolve_output_path(
+            output_dir,
+            output_cfg.get("landmarks_csv", "landmarks.csv"),
+        )
+        write_keyframes_csv(sparse_map.keyframes, keyframes_path)
+        write_landmarks_csv(sparse_map.landmarks.values(), landmarks_path)
+        pose_graph_path = _resolve_output_path(
+            output_dir,
+            output_cfg.get("pose_graph_csv", "pose_graph.csv"),
+        )
+        write_pose_graph_csv(pipeline.slam.pose_graph.edges, pose_graph_path)
 
     velocity_path = None
     if bool(velocity_cfg.get("enabled", False)):
@@ -49,21 +70,37 @@ def save_outputs(pipeline, config: dict, interrupted: bool = False) -> tuple:
 
     result_path = None
     result_stats = None
+    dataset_format = dataset_cfg.get("format", "evslam_rosbag")
     reference_path = dataset_cfg.get("reference_timestamps_path")
-    if reference_path and len(pipeline.trajectory) == 0:
+    if dataset_format == "m3ed_h5" and reference_path is None:
+        raise ValueError("M3ED output requires dataset.reference_timestamps_path")
+    if reference_path and len(pipeline.trajectory) == 0 and dataset_format != "m3ed_h5":
         print("Skipping challenge result: trajectory is empty.")
     elif reference_path:
-        result_path = _resolve_output_path(
-            output_dir,
-            output_cfg.get("result_txt", "result.txt"),
-        )
-        result_stats = write_result_from_reference_file(
-            trajectory=pipeline.trajectory,
-            velocity=pipeline.velocity_trajectory,
-            reference_path=reference_path,
-            output_path=result_path,
-            skip_out_of_range=True,
-        )
+        if dataset_format == "m3ed_h5":
+            sequence_name = dataset_cfg.get("sequence_name")
+            if not sequence_name:
+                raise ValueError("M3ED output requires dataset.sequence_name")
+            result_path = output_dir / f"{sequence_name}.txt"
+            result_stats = write_m3ed_result_from_reference_file(
+                trajectory=pipeline.trajectory,
+                reference_path=reference_path,
+                output_path=result_path,
+                sequence_name=sequence_name,
+                allow_partial=interrupted,
+            )
+        else:
+            result_path = _resolve_output_path(
+                output_dir,
+                output_cfg.get("result_txt", "result.txt"),
+            )
+            result_stats = write_result_from_reference_file(
+                trajectory=pipeline.trajectory,
+                velocity=pipeline.velocity_trajectory,
+                reference_path=reference_path,
+                output_path=result_path,
+                skip_out_of_range=True,
+            )
 
     _print_summary(pipeline.get_summary())
     _print_saved_outputs(
@@ -71,6 +108,9 @@ def save_outputs(pipeline, config: dict, interrupted: bool = False) -> tuple:
         velocity_path,
         result_path,
         result_stats,
+        keyframes_path,
+        landmarks_path,
+        pose_graph_path,
     )
 
     if interrupted:
@@ -92,7 +132,14 @@ def write_vo_csv(results, path) -> None:
             "reprojection_error_mean,reprojection_error_median,"
             "pnp_rotation_step_deg,imu_rotation_step_deg,"
             "pnp_imu_rotation_error_deg,imu_rotation_consistent,"
-            "imu_rejected,message\n"
+            "imu_rejected,message,pose_source,map_point_count,"
+            "map_inlier_count,local_landmark_count,"
+            "map_descriptor_match_count,map_message,new_feature_count,"
+            "tracking_state,reference_keyframe_id,is_keyframe,"
+            "loop_candidate_count,loop_candidate_id,loop_match_count,"
+            "loop_accepted,relocalized,graph_cost_before,graph_cost_after,"
+            "loop_pnp_point_count,loop_inlier_count,loop_inlier_ratio,"
+            "loop_reprojection_error_median,loop_pnp_message\n"
         )
 
         for result in results:
@@ -114,7 +161,29 @@ def write_vo_csv(results, path) -> None:
                 f"{result.pnp_imu_rotation_error_deg:.9f},"
                 f"{int(result.imu_rotation_consistent)},"
                 f"{int(result.imu_rejected)},"
-                f"{_csv_safe(result.message)}\n"
+                f"{_csv_safe(result.message)},"
+                f"{result.pose_source},"
+                f"{result.map_point_count},"
+                f"{result.map_inlier_count},"
+                f"{result.local_landmark_count},"
+                f"{result.map_descriptor_match_count},"
+                f"{_csv_safe(result.map_message)},"
+                f"{result.new_feature_count},"
+                f"{result.tracking_state},"
+                f"{result.reference_keyframe_id},"
+                f"{int(result.is_keyframe)},"
+                f"{result.loop_candidate_count},"
+                f"{result.loop_candidate_id},"
+                f"{result.loop_match_count},"
+                f"{int(result.loop_accepted)},"
+                f"{int(result.relocalized)},"
+                f"{result.graph_cost_before:.9f},"
+                f"{result.graph_cost_after:.9f},"
+                f"{result.loop_pnp_point_count},"
+                f"{result.loop_inlier_count},"
+                f"{result.loop_inlier_ratio:.9f},"
+                f"{result.loop_reprojection_error_median:.9f},"
+                f"{_csv_safe(result.loop_pnp_message)}\n"
             )
 
 
@@ -130,6 +199,70 @@ def write_velocity_csv(velocity: VelocityTrajectory, path) -> None:
         header="timestamp,vx_camera,vy_camera,vz_camera,speed",
         comments="",
     )
+
+
+def write_keyframes_csv(keyframes, path) -> None:
+    """Write keyframe poses and map point counts."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with path.open("w", encoding="utf-8") as file:
+        file.write(
+            "id,frame_index,timestamp,tx,ty,tz,qx,qy,qz,qw,point_count\n"
+        )
+        for keyframe in keyframes:
+            t = keyframe.T_W_C[:3, 3]
+            qx, qy, qz, qw = rotmat_to_quat_xyzw(keyframe.T_W_C[:3, :3])
+            file.write(
+                f"{keyframe.id},{keyframe.frame_index},{keyframe.timestamp:.9f},"
+                f"{t[0]:.9f},{t[1]:.9f},{t[2]:.9f},"
+                f"{qx:.9f},{qy:.9f},{qz:.9f},{qw:.9f},"
+                f"{keyframe.point_count}\n"
+            )
+
+
+def write_landmarks_csv(landmarks, path) -> None:
+    """Write sparse map landmarks and observation counts."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with path.open("w", encoding="utf-8") as file:
+        file.write(
+            "id,anchor_keyframe_id,x_anchor,y_anchor,z_anchor,"
+            "x_world,y_world,z_world,observation_count,last_seen_keyframe_id\n"
+        )
+        for landmark in sorted(landmarks, key=lambda item: item.id):
+            x_C = landmark.position_C_anchor
+            x_W = landmark.position_W
+            file.write(
+                f"{landmark.id},{landmark.anchor_keyframe_id},"
+                f"{x_C[0]:.9f},{x_C[1]:.9f},{x_C[2]:.9f},"
+                f"{x_W[0]:.9f},{x_W[1]:.9f},{x_W[2]:.9f},"
+                f"{landmark.observation_count},"
+                f"{landmark.last_seen_keyframe_id}\n"
+            )
+
+
+def write_pose_graph_csv(edges, path) -> None:
+    """Write sequential and loop pose-graph constraints."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with path.open("w", encoding="utf-8") as file:
+        file.write(
+            "source_id,target_id,type,tx,ty,tz,qx,qy,qz,qw,"
+            "inlier_count,reprojection_error_median\n"
+        )
+        for edge in edges:
+            T = edge.T_C_source_C_target
+            t = T[:3, 3]
+            qx, qy, qz, qw = rotmat_to_quat_xyzw(T[:3, :3])
+            file.write(
+                f"{edge.source_id},{edge.target_id},{edge.edge_type},"
+                f"{t[0]:.9f},{t[1]:.9f},{t[2]:.9f},"
+                f"{qx:.9f},{qy:.9f},{qz:.9f},{qw:.9f},"
+                f"{edge.inlier_count},{edge.reprojection_error_median:.9f}\n"
+            )
 
 
 def load_evslam_result_array(path) -> np.ndarray:
@@ -322,6 +455,125 @@ def write_result_from_reference_file(
     )
 
 
+def write_m3ed_result_from_reference_file(
+    trajectory: Trajectory,
+    reference_path,
+    output_path,
+    sequence_name: str,
+    allow_partial: bool = False,
+) -> ResultWriterStats:
+    """Write M3ED output, optionally limited to the available trajectory range."""
+    timestamps = load_reference_timestamps(reference_path)
+    _validate_reference_timestamps(timestamps)
+    output_path = Path(output_path)
+    expected_name = f"{sequence_name}.txt"
+    if output_path.name != expected_name:
+        raise ValueError(
+            f"M3ED result must be named {expected_name}, got {output_path.name}"
+        )
+    if trajectory.is_empty:
+        raise ValueError("Cannot write M3ED result from an empty trajectory")
+    covered = (
+        (timestamps >= trajectory.first().timestamp)
+        & (timestamps <= trajectory.last().timestamp)
+    )
+    if not allow_partial and not np.all(covered):
+        raise ValueError(
+            "M3ED reference range is outside trajectory coverage: "
+            f"[{timestamps[0]:.9f}, {timestamps[-1]:.9f}] not within "
+            f"[{trajectory.first().timestamp:.9f}, {trajectory.last().timestamp:.9f}]"
+        )
+    selected_timestamps = timestamps[covered] if allow_partial else timestamps
+    if len(selected_timestamps) == 0:
+        raise ValueError("Trajectory does not cover any M3ED reference timestamp")
+
+    data = trajectory_to_m3ed_array(trajectory.interpolate_many(
+        selected_timestamps,
+        clamp=False,
+    ))
+    _validate_m3ed_array(data, selected_timestamps)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savetxt(output_path, data, fmt="%.9f")
+    validate_m3ed_result_file(
+        output_path,
+        sequence_name=sequence_name,
+        reference_path=None if allow_partial else reference_path,
+    )
+    return ResultWriterStats(
+        reference_count=len(timestamps),
+        written_count=len(data),
+        skipped_count=len(timestamps) - len(data),
+        first_written_timestamp=float(selected_timestamps[0]),
+        last_written_timestamp=float(selected_timestamps[-1]),
+    )
+
+
+def trajectory_to_m3ed_array(trajectory: Trajectory) -> np.ndarray:
+    """Convert internal T_W_C poses to the orientation convention used by M3ED."""
+    data = trajectory.as_tum_array()
+    data[:, 4:7] *= -1.0
+    return data
+
+
+def trajectory_from_m3ed_array(data: np.ndarray) -> Trajectory:
+    """Convert M3ED positions and R_C_W quaternions to internal T_W_C poses."""
+    data = np.asarray(data, dtype=np.float64).copy()
+    data[:, 4:7] *= -1.0
+    return Trajectory.from_tum_array(data)
+
+
+def validate_m3ed_result_file(
+    path,
+    sequence_name: str = None,
+    reference_path=None,
+) -> np.ndarray:
+    """Validate one M3ED challenge file and optionally its reference times."""
+    path = Path(path)
+    if sequence_name is not None and path.name != f"{sequence_name}.txt":
+        raise ValueError(f"Expected M3ED result {sequence_name}.txt, got {path.name}")
+    try:
+        data = np.loadtxt(path, dtype=np.float64)
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"Could not read M3ED result: {path}") from exc
+    if data.ndim == 1:
+        data = data.reshape(1, -1)
+
+    reference_timestamps = None
+    if reference_path is not None:
+        reference_timestamps = load_reference_timestamps(reference_path)
+        _validate_reference_timestamps(reference_timestamps)
+    _validate_m3ed_array(data, reference_timestamps)
+    return data
+
+
+def _validate_reference_timestamps(timestamps: np.ndarray) -> None:
+    timestamps = np.asarray(timestamps, dtype=np.float64).reshape(-1)
+    if len(timestamps) == 0 or not np.all(np.isfinite(timestamps)):
+        raise ValueError("M3ED reference timestamps must be non-empty and finite")
+    if np.any(np.diff(timestamps) <= 0.0):
+        raise ValueError("M3ED reference timestamps must be strictly increasing")
+
+
+def _validate_m3ed_array(
+    data: np.ndarray,
+    reference_timestamps: np.ndarray = None,
+) -> None:
+    data = np.asarray(data, dtype=np.float64)
+    if data.ndim != 2 or data.shape[1] != 8 or len(data) == 0:
+        raise ValueError(f"M3ED result must be a non-empty Nx8 array, got {data.shape}")
+    if not np.all(np.isfinite(data)):
+        raise ValueError("M3ED result contains non-finite values")
+    if np.any(np.diff(data[:, 0]) <= 0.0):
+        raise ValueError("M3ED result timestamps must be strictly increasing")
+    quaternion_norms = np.linalg.norm(data[:, 4:8], axis=1)
+    if not np.allclose(quaternion_norms, 1.0, atol=1e-6):
+        raise ValueError("M3ED result quaternions must be non-zero and normalized")
+    if reference_timestamps is not None and not np.array_equal(
+        data[:, 0], np.asarray(reference_timestamps, dtype=np.float64)
+    ):
+        raise ValueError("M3ED result timestamps do not exactly match the reference")
+
+
 def _interpolate_valid_poses(
     trajectory: Trajectory,
     timestamps: np.ndarray,
@@ -382,7 +634,7 @@ def _interpolate_world_velocities(
 
 def _print_summary(summary) -> None:
     print()
-    print("VO summary")
+    print("SLAM summary")
     print("=" * 80)
     print(f"processed_frames: {summary.processed_frames}")
     print(f"successful_steps: {summary.successful_steps}")
@@ -393,6 +645,12 @@ def _print_summary(summary) -> None:
     print(f"motion_compensation_failed: {summary.motion_compensation_failed}")
     print(f"imu_prior_available_frames: {summary.imu_prior_available_frames}")
     print(f"imu_rejected_steps: {summary.imu_rejected_steps}")
+    print(f"keyframes: {summary.keyframe_count}")
+    print(f"landmarks: {summary.landmark_count}")
+    print(f"accepted_loops: {summary.accepted_loop_count}")
+    print(f"relocalizations: {summary.relocalization_count}")
+    print(f"graph_cost_before: {format_value(summary.graph_cost_before)}")
+    print(f"graph_cost_after: {format_value(summary.graph_cost_after)}")
     print(
         "final_position: "
         f"[{summary.final_position[0]:.6f}, "
@@ -406,6 +664,9 @@ def _print_saved_outputs(
     velocity_path,
     result_path,
     result_stats,
+    keyframes_path,
+    landmarks_path,
+    pose_graph_path,
 ) -> None:
     print()
     print("Saved outputs")
@@ -424,6 +685,11 @@ def _print_saved_outputs(
                 f"written={result_stats.written_count}, "
                 f"skipped={result_stats.skipped_count}"
             )
+
+    if keyframes_path is not None:
+        print(f"keyframes_csv: {keyframes_path}")
+        print(f"landmarks_csv: {landmarks_path}")
+        print(f"pose_graph_csv: {pose_graph_path}")
 
 
 def _resolve_output_path(output_dir: Path, path_value) -> Path:

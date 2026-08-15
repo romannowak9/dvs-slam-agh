@@ -205,8 +205,8 @@ def format_value(value, precision: int = 3) -> str:
     return f"{value_float:.{precision}f}"
 
 
-def print_vo_frame(frame_index, window, result, motion_compensation=None) -> None:
-    """Print the diagnostics produced for one stereo VO frame."""
+def print_slam_frame(frame_index, window, result, motion_compensation=None) -> None:
+    """Print diagnostics produced for one stereo SLAM frame."""
     t = result.T_W_Cleft[:3, 3]
     motion_text = ""
 
@@ -225,9 +225,17 @@ def print_vo_frame(frame_index, window, result, motion_compensation=None) -> Non
         f"events_right={len(window.right)}, "
         f"{motion_text}"
         f"success={result.success}, "
+        f"source={result.pose_source}, "
         f"tracks={result.track_count}, "
+        f"added={result.new_feature_count}, "
         f"pnp={result.pnp_point_count}, "
         f"inliers={result.pnp_inlier_count}, "
+        f"map={result.map_inlier_count}/{result.map_point_count}, "
+        f"local={result.local_landmark_count}, "
+        f"orb={result.map_descriptor_match_count}, "
+        f"loop={result.loop_accepted}, "
+        f"relocalized={result.relocalized}, "
+        f"map_msg={result.map_message}, "
         f"err_med={format_value(result.reprojection_error_median)}, "
         f"pnp_rot={format_value(result.pnp_rotation_step_deg)}, "
         f"imu_rot={format_value(result.imu_rotation_step_deg)}, "

@@ -1,363 +1,177 @@
-# Usage of scripts
+# Scripts usage
 
-## Calibration debug script
+Verification scripts use the existing project YAML for dataset and algorithm
+settings. Parameters already present in YAML, such as event topics, processing
+range, aggregation, BAF, rectification, tracker, stereo depth, PnP, IMU and
+`output.output_dir`, are not repeated in the command line.
+
+Options used only by a particular diagnostic remain CLI arguments. Use
+`--help` to list them. The default configuration is
+`configs/evslam_seq007_test_slam.yaml`; pass another one with `--config`.
+
+## Dataset and event processing
+
+```bash
+python3 scripts/verification/inspect_bag.py \
+  --config configs/evslam_seq007_test_slam.yaml \
+  --inspect-imu
+
+python3 scripts/verification/debug_event_windows.py \
+  --config configs/evslam_seq007_test_slam.yaml \
+  --num-windows 10
+
+python3 scripts/verification/debug_event_frames.py \
+  --config configs/evslam_seq007_test_slam.yaml \
+  --save-preview
+
+python3 scripts/verification/compare_sensors.py \
+  --config configs/evslam_seq007_test_slam.yaml \
+  --only-color
+```
+
+`height`, `width`, camera topics used only for sensor comparison, display
+options and inspection limits remain optional arguments.
+
+## Calibration, rectification and IMU
+
 ```bash
 python3 scripts/verification/debug_calibration.py \
-  --camera-yaml /data/evSLAM/drone_calibration/calib_results_cam_drone.yaml \
-  --imu-yaml /data/evSLAM/drone_calibration/calib_results_imu_drone.yaml
-```
+  --config configs/evslam_seq007_test_slam.yaml
 
-## bag verification script
-```bash
-python3 scripts/verification/inspect_bag.py \
-  --bag /data/evSLAM/seq001.bag
-```
-
-or with all options
-```bash
-python3 scripts/verification/inspect_bag.py \
-  --bag /data/evSLAM/seq001.bag \
-  --left-topic /dvxplorer_left/events \
-  --right-topic /dvxplorer_right/events \
-  --imu-topic /dvxplorer_left/imu \
-  --inspect-imu \
-  --num-batches 5 \
-  --sample-events 8 \
-  --full-scan
-```
-
-## Event window verification
-```bash
-python3 scripts/verification/debug_event_windows.py \
-  --bag /data/evSLAM/seq001.bag \
-  --t-start 956.7
-```
-
-```bash
-python3 scripts/verification/debug_event_windows.py \
-  --bag /data/evSLAM/seq001.bag \
-  --left-topic /dvxplorer_left/events \
-  --right-topic /dvxplorer_right/events \
-  --time-window 0.0333333333 \
-  --num-windows 5 \
-  --sample-events 8 \
-  --t-start 956.7 \
-  --summary
-```
-
-## Event frames verification
-
-```bash
-python3 scripts/verification/debug_event_frames.py \
-  --bag /data/evSLAM/seq001.bag \
-  --num-frames 10 \
-  --time-window 0.1 \
-  --save-preview
-```
-
-Exponential decay
-```bash
-python3 scripts/verification/debug_event_frames.py \
-  --bag /data/evSLAM/seq001.bag \
-  --mode exponential \
-  --tau 0.3 \
-  --num-frames 10 \
-  --time-window 0.3 \
-  --save-preview
-```
-
-BAF Filter
-```bash
-python3 scripts/verification/debug_event_frames.py \
-  --bag /data/evSLAM/seq001.bag \
-  --mode exponential \
-  --tau 0.004 \
-  --use-baf \
-  --baf-time-window 0.006 \
-  --baf-radius 2 \
-  --baf-min-neighbors 5 \
-  --num-frames 10 \
-  --time-window 0.006 \
-  --t-start 970 \
-  --save-preview
-```
-
-Use `--display` to display images in window and not save imgs to files
-
-## Comparing sensors
-
-Only color camera and left dvs
-```bash
-python3 scripts/verification/compare_sensors.py \
-  --bag /data/evSLAM/seq001.bag \
-  --mode exponential \
-  --tau 0.03 \
-  --use-baf \
-  --baf-time-window 0.005 \
-  --baf-radius 1 \
-  --baf-min-neighbors 2 \
-  --num-frames 100 \
-  --time-window 0.005 \
-  --t-start 950 \
-  --only-color \
-  --display
-```
-
-All left sensors
-```bash
-python3 scripts/verification/compare_sensors.py \
-  --bag /data/evSLAM/seq001.bag \
-  --mode exponential \
-  --tau 0.004 \
-  --use-baf \
-  --baf-time-window 0.005 \
-  --baf-radius 2 \
-  --baf-min-neighbors 4 \
-  --num-frames 10 \
-  --time-window 0.005 \
-  --t-start 970 \
-  --display
-```
-
-Use `--display` to display images in window and not save imgs to files
-
-## Stereo rectification verification
-
-```bash
 python3 scripts/verification/debug_rectification.py \
-  --bag /data/evSLAM/seq001.bag \
-  --camera-yaml /data/evSLAM/drone_calibration/calib_results_cam_drone.yaml \
-  --num-frames 10 \
-  --time-window 0.005 \
-  --t-start 970 \
+  --config configs/evslam_seq007_test_slam.yaml \
   --draw-lines
-```
 
-or
+python3 scripts/verification/debug_imu_motion_compensation.py \
+  --config configs/evslam_seq007_test_slam.yaml \
+  --save-preview
 
-```bash
-python3 scripts/verification/debug_rectification.py \
-  --bag /data/evSLAM/seq001.bag \
-  --camera-yaml /data/evSLAM/drone_calibration/calib_results_cam_drone.yaml \
-  --mode exponential \
-  --tau 0.007 \
-  --use-baf \
-  --baf-time-window 0.007 \
-  --baf-radius 2 \
-  --baf-min-neighbors 5 \
-  --time-window 0.007 \
-  --t-start 970 \
-  --num-frames 10 \
-  --draw-lines
-```
-
-Use `--display` to display images in window and not save imgs to files
-
-## Feature tracker verification
-```bash
-python3 scripts/verification/debug_feature_tracking.py \
-  --bag /data/evSLAM/seq001.bag \
-  --camera-yaml /data/evSLAM/drone_calibration/calib_results_cam_drone.yaml \
-  --t-start 970 \
-  --num-frames 100 \
-  --time-window 0.005 \
-  --display
-```
-
-or
-
-```bash
-python3 scripts/verification/debug_feature_tracking.py \
-  --bag /data/evSLAM/seq001.bag \
-  --camera-yaml /data/evSLAM/drone_calibration/calib_results_cam_drone.yaml \
-  --mode exponential \
-  --tau 0.007 \
-  --time-window 0.007 \
-  --use-baf \
-  --baf-time-window 0.005 \
-  --baf-radius 2 \
-  --baf-min-neighbors 5 \
-  --min-features 250 \
-  --detector gftt \
-  --t-start 970 \
-  --num-frames 10
-```
-
-## Stereo depth estimation - triangulation
-
-```bash
-python3 scripts/verification/debug_stereo_depth.py \
-  --bag /data/evSLAM/seq001.bag \
-  --camera-yaml /data/evSLAM/drone_calibration/calib_results_cam_drone.yaml \
-  --t-start 970 \
-  --num-frames 100 \
-  --display
-```
-
-```bash
-python3 scripts/verification/debug_stereo_depth.py \
-  --bag /data/evSLAM/seq001.bag \
-  --camera-yaml /data/evSLAM/drone_calibration/calib_results_cam_drone.yaml \
-  --mode exponential \
-  --tau 0.006 \
-  --time-window 0.007 \
-  --use-baf \
-  --baf-time-window 0.005 \
-  --baf-radius 2 \
-  --baf-min-neighbors 5 \
-  --min-features 250 \
-  --max-draw-matches 40 \
-  --detector gftt \
-  --epipolar-threshold 2.0 \
-  --min-disparity 0.5 \
-  --max-disparity 250 \
-  --min-depth 0.05 \
-  --max-depth 100 \
-  --t-start 970 \
-  --num-frames 200 \
-  --display
-```
-
-## PnP Visual Odometry
-
-```bash
-python3 scripts/verification/run_stereo_pnp_vo.py \
-  --bag /data/evSLAM/seq001.bag \
-  --camera-yaml /data/evSLAM/drone_calibration/calib_results_cam_drone.yaml \
-  --t-start 970 \
-  --num-frames 200 \
-  --display
-```
-
-or
-
-```bash
-python3 scripts/verification/run_stereo_pnp_vo.py \
-  --bag /data/evSLAM/seq001.bag \
-  --camera-yaml /data/evSLAM/drone_calibration/calib_results_cam_drone.yaml \
-  --mode exponential \
-  --tau 0.006 \
-  --time-window 0.007 \
-  --use-baf \
-  --baf-time-window 0.005 \
-  --baf-radius 2 \
-  --baf-min-neighbors 5 \
-  --t-start 970 \
-  --num-frames 100 \
-  --display
-```
-
-To save trajectory of entire bag:
-```bash
-python3 scripts/verification/run_stereo_pnp_vo.py \
-  --bag /data/evSLAM/seq001.bag \
-  --camera-yaml /data/evSLAM/drone_calibration/calib_results_cam_drone.yaml \
-  --mode exponential \
-  --tau 0.01 \
-  --time-window 0.01 \
-  --detector gftt \
-  --use-baf \
-  --baf-time-window 0.007 \
-  --baf-radius 2 \
-  --baf-min-neighbors 5 \
-  --num-frames 0 \
-  --display
-```
-
-## Align results to gt
-
-```bash
-python3 scripts/align_evslam_result_to_gt.py \
-  --estimate outputs/evslam_vo_seq007_try03/result_seq007.txt \
-  --gt /data/evSLAM/gt/seq007_test_gt.txt \
-  --output outputs/evslam_vo_seq007_try03/result_seq007_aligned_se3.txt \
-  --method se3  # or first_pose or sim3
-```
-
-Or with only first sample
-
-```bash
-python3 scripts/align_evslam_result_to_gt.py \
-  --estimate outputs/evslam_vo_seq007_/result_seq007.txt \
-  --gt /data/evSLAM/gt/seq007_test_gt.txt \
-  --output outputs/evslam_vo_seq007_/result_seq007_aligned_first_pose.txt \
-  --method first_pose
-```
-
-## Plot trajectory
-
-```bash
-python3 scripts/plot_trajectory.py \
-  --trajectory outputs/evslam_vo_seq001_v02/result_seq001.txt \
-  --output-dir outputs/evslam_vo_seq001_v02/plots
-```
-
-Or with gt:
-
-```bash
-python3 scripts/plot_trajectory.py \
-  --trajectory outputs/evslam_vo_seq007_rot_comp_full/result_seq007_aligned_first_pose.txt \
-  --output-dir outputs/evslam_vo_seq007_rot_comp_full/plots_first_pose \
-  --gt /data/evSLAM/gt/seq007_test_gt.txt
-```
-
-## Evaluate EvSLAM metrics: ATE i AUC
-
-metrics described at website: https://nail-hnu.github.io/EvSLAM/competition.html
-
-```bash
-python3 scripts/evaluate_evslam_metrics.py \
-  --estimate outputs/evslam_vo_seq007/result_seq007.txt \
-  --gt /data/evSLAM/gt/seq007_test_gt.txt \
-  --output outputs/evslam_vo_seq007/metrics.txt
-```
-
-## IMU rotation verification
-
-```bash
 python3 scripts/verification/debug_imu_rotation.py \
-  --bag /data/evSLAM/seq007_test.bag \
-  --camera-calibration /data/evSLAM/mecanum_calibration/calib_results_cam_others.yaml \
-  --imu-calibration /data/evSLAM/mecanum_calibration/calib_results_imu_others.yaml \
-  --estimate outputs/evslam_vo_seq007_/result_seq007_aligned_first_pose.txt \
-  --csv outputs/evslam_vo_seq007_/imu_rotation_debug.csv
+  --config configs/evslam_seq007_test_slam.yaml \
+  --estimate outputs/example/result_seq007.txt \
+  --csv outputs/example/imu_rotation_debug.csv
 ```
 
-## Event windows rotation compensation with IMU
+The diagnostic-only `extra-timeshift`, preview and display settings remain
+arguments.
+
+## Tracking, depth and pose estimation
 
 ```bash
-python3 scripts/verification/debug_imu_motion_compensation.py \
-  --bag /data/evSLAM/seq001.bag \
-  --camera-calibration /data/evSLAM/drone_calibration/calib_results_cam_drone.yaml \
-  --imu-calibration /data/evSLAM/drone_calibration/calib_results_imu_drone.yaml \
-  --mode exponential \
-  --tau 0.02 \
-  --use-baf \
-  --baf-time-window 0.01 \
-  --baf-radius 2 \
-  --baf-min-neighbors 5 \
-  --num-frames 10 \
-  --time-window 0.02 \
-  --t-start 970 \
-  --save-preview \
-  --output-dir outputs/debug_imu_motion_compensation
+python3 scripts/verification/debug_feature_tracking.py \
+  --config configs/evslam_seq007_test_slam.yaml
+
+python3 scripts/verification/debug_stereo_depth.py \
+  --config configs/evslam_seq007_test_slam.yaml \
+  --max-draw-matches 200
+
+python3 scripts/verification/run_stereo_pnp_vo.py \
+  --config configs/evslam_seq007_test_vo.yaml \
+  --save-debug
 ```
+
+## SLAM map
+
+Run SLAM and save keyframe images plus map diagnostics:
 
 ```bash
-python3 scripts/verification/debug_imu_motion_compensation.py \
-  --bag /data/evSLAM/seq007_test.bag \
-  --camera-calibration /data/evSLAM/mecanum_calibration/calib_results_cam_others.yaml \
-  --imu-calibration /data/evSLAM/mecanum_calibration/calib_results_imu_others.yaml \
-  --mode exponential \
-  --tau 0.05 \
-  --use-baf \
-  --baf-time-window 0.01 \
-  --baf-radius 2 \
-  --baf-min-neighbors 5 \
-  --num-frames 10 \
-  --time-window 0.05 \
-  --save-preview \
-  --output-dir outputs/debug_imu_motion_compensation_seq007
+python3 scripts/verification/debug_slam_map.py \
+  --config configs/evslam_seq007_test_slam.yaml \
+  --max-plot-distance 5
 ```
 
-Use `--display` instead of `--save-preview` for an interactive preview.
+Create only `map_3d.png` and `tracking_diagnostics.png` from saved CSV files:
+
+```bash
+python3 scripts/verification/plot_slam_map_results.py \
+  outputs/evslam_seq007_slam_stage_2_full
+```
+
+## Result analysis
+
+These parameters are not part of the algorithm YAML and therefore remain CLI
+arguments:
+
+```bash
+python3 scripts/align_evslam_result_to_gt.py \
+  --estimate outputs/example/result_seq007.txt \
+  --gt /data/evSLAM/gt/seq007_test_gt.txt \
+  --output outputs/example/result_seq007_aligned_se3.txt \
+  --method se3
+
+python3 scripts/plot_trajectory.py \
+  --trajectory outputs/example/result_seq007_aligned_se3.txt \
+  --gt /data/evSLAM/gt/seq007_test_gt.txt \
+  --output-dir outputs/example/plots
+
+python3 scripts/evaluate_evslam_metrics.py \
+  --estimate outputs/example/result_seq007_aligned_se3.txt \
+  --gt /data/evSLAM/gt/seq007_test_gt.txt \
+  --output outputs/example/metrics.txt
+```
+
+M3ED uses separate analysis scripts because its challenge files contain poses
+only (`timestamp tx ty tz qx qy qz qw`). The plotting script derives smoothed
+camera-frame velocities from both estimated and GT poses. It displays both
+trajectories directly in the official M3ED camera frame, without reordering
+axes. M3ED positions describe the camera in the initial-camera frame, while the
+published quaternion represents the inverse rotation; the M3ED scripts perform
+this conversion at the file boundary and use project-standard `T_W_C`
+internally.
+
+```bash
+python3 scripts/align_m3ed_result_to_gt.py \
+  --estimate outputs/example/falcon_outdoor_day_fast_flight_2.txt \
+  --gt /data/m3ed/gt/falcon_outdoor_day_fast_flight_2_pose_evo_gt.txt \
+  --output outputs/example/result_aligned_se3.txt \
+  --method se3
+
+python3 scripts/plot_m3ed_trajectory.py \
+  --trajectory outputs/example/result_aligned_se3.txt \
+  --gt /data/m3ed/gt/falcon_outdoor_day_fast_flight_2_pose_evo_gt.txt \
+  --output-dir outputs/example/plots_se3
+
+python3 scripts/evaluate_m3ed_metrics.py \
+  --estimate outputs/example/result_aligned_se3.txt \
+  --gt /data/m3ed/gt/falcon_outdoor_day_fast_flight_2_pose_evo_gt.txt \
+  --output outputs/example/metrics_se3.txt
+```
+
+## Main SLAM runner
+
+```bash
+python3 scripts/run_event_slam.py \
+  --config configs/evslam_seq007_test_slam.yaml
+```
+
+The same runner selects M3ED from `dataset.format: m3ed_h5`:
+
+```bash
+python3 scripts/run_event_slam.py \
+  --config configs/m3ed_falcon_fast_flight_2_slam.yaml
+```
+
+An interrupted M3ED run still saves the trajectory, map diagnostics and a
+partial `<sequence_name>.txt`. The partial challenge file contains only the
+reference timestamps covered by the trajectory; a completed run remains strict
+and must cover every reference timestamp.
+
+M3ED requires the system package `python3-h5py` documented in
+`StartInstruction.md`.
+
+Inspect reader throughput without running SLAM:
+
+```bash
+python3 scripts/verification/inspect_m3ed_h5.py
+```
+
+Validate and package the three official challenge files:
+
+```bash
+python3 scripts/package_m3ed_submission.py \
+  outputs/m3ed_challenge outputs/m3ed_submission.zip
+```
+
+Debug images are written below `output.output_dir` from the selected YAML. Use
+a copied configuration with a different output directory when you want to keep
+them separate from the main run.

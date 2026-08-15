@@ -43,9 +43,9 @@ class EventBatch:
 
         p_arr = np.asarray(self.p).reshape(-1)
         if p_arr.dtype == np.bool_:
-            self.p = p_arr.astype(np.bool_)
+            self.p = p_arr
         else:
-            self.p = (p_arr > 0).astype(np.bool_)
+            self.p = p_arr > 0
 
         n_events = len(self.t)
         if not (len(self.x) == len(self.y) == len(self.p) == n_events):

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 
@@ -19,21 +18,12 @@ if SRC_PATH.exists():
 
 from event_slam.calibration.kalibr_parser import load_stereo_calibration
 from event_slam.calibration.stereo_rectifier import StereoRectifier
-from event_slam.datasets.evslam_reader import (
-    DEFAULT_LEFT_EVENT_TOPIC,
-    DEFAULT_RIGHT_EVENT_TOPIC,
-    EvSlamRosbagReader,
-)
-from event_slam.events.event_aggregator import (
-    EventFrameAggregator,
-    EventFrameMode,
-    PolarityMode,
-)
+from event_slam.datasets.evslam_reader import EvSlamRosbagReader
+from event_slam.events.event_aggregator import EventFrameAggregator
 from event_slam.events.event_filter import StereoBackgroundActivityFilter
 from event_slam.events.event_window import StereoEventWindowBuilder
 from event_slam.io.result_io import write_vo_csv
-from event_slam.vo.feature_tracker import FeatureDetectorMode
-from event_slam.vo.stereo_pnp_vo import StereoPnPVO
+from event_slam.slam.stereo_pnp import StereoPnPSLAM
 
 from event_slam.debug.visualization import (
     colorize_event_frame,
@@ -43,10 +33,11 @@ from event_slam.debug.visualization import (
     save_image,
     show_image,
 )
+from verification_config import load_args, verification_parser
 
 
 def main() -> None:
-    args = parse_args()
+    _, args = parse_args()
 
     if args.save_debug:
         args.debug_dir.mkdir(parents=True, exist_ok=True)
@@ -84,13 +75,12 @@ def main() -> None:
         interpolation="nearest",
     )
 
-    vo = StereoPnPVO(
+    vo = StereoPnPSLAM(
         K=rectifier.K_left_rectified,
         P1=rectifier.P1,
         P2=rectifier.P2,
         feature_tracker_params={
             "detector": args.detector,
-            "min_features": args.min_features,
             "max_features": args.max_features,
             "fast_threshold": args.fast_threshold,
             "use_forward_backward_check": args.forward_backward_check,
@@ -181,95 +171,6 @@ def main() -> None:
     print(f"trajectory_csv: {csv_path}")
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Run stereo PnP visual odometry on EvSLAM data."
-    )
-
-    parser.add_argument("--bag", required=True, type=Path)
-    parser.add_argument("--camera-yaml", required=True, type=Path)
-
-    parser.add_argument("--left-topic", default=DEFAULT_LEFT_EVENT_TOPIC)
-    parser.add_argument("--right-topic", default=DEFAULT_RIGHT_EVENT_TOPIC)
-
-    parser.add_argument("--time-window", default=0.0333333333, type=float)
-    parser.add_argument("--num-frames", default=500, type=int, help="Number of frames to process. Use 0 to process the whole bag.",)
-
-    parser.add_argument(
-        "--mode",
-        default=EventFrameMode.STANDARD.value,
-        choices=[mode.value for mode in EventFrameMode],
-    )
-
-    parser.add_argument(
-        "--polarity-mode",
-        default=PolarityMode.BOTH.value,
-        choices=[mode.value for mode in PolarityMode],
-    )
-
-    parser.add_argument("--tau", default=0.03, type=float)
-
-    parser.add_argument("--use-baf", action="store_true")
-    parser.add_argument("--baf-time-window", default=1.0 / 24.0, type=float)
-    parser.add_argument("--baf-radius", default=2, type=int)
-    parser.add_argument("--baf-min-neighbors", default=1, type=int)
-
-    parser.add_argument("--t-start", default=None, type=float)
-    parser.add_argument("--t-end", default=None, type=float)
-
-    parser.add_argument("--alpha", default=0.0, type=float)
-
-    parser.add_argument(
-        "--detector",
-        default=FeatureDetectorMode.FAST.value,
-        choices=[mode.value for mode in FeatureDetectorMode],
-    )
-
-    parser.add_argument("--min-features", default=250, type=int)
-    parser.add_argument("--max-features", default=1000, type=int)
-    parser.add_argument("--fast-threshold", default=25, type=int)
-
-    parser.add_argument("--forward-backward-check", action="store_true")
-    parser.add_argument("--fb-threshold", default=1.0, type=float)
-
-    parser.add_argument("--epipolar-threshold", default=2.0, type=float)
-    parser.add_argument("--min-disparity", default=0.5, type=float)
-    parser.add_argument("--max-disparity", default=250.0, type=float)
-
-    parser.add_argument("--min-depth", default=0.05, type=float)
-    parser.add_argument("--max-depth", default=100.0, type=float)
-
-    parser.add_argument("--min-pnp-points", default=20, type=int)
-    parser.add_argument("--min-pnp-inliers", default=30, type=int)
-    parser.add_argument("--min-pnp-inlier-ratio", default=0.15, type=float)
-
-    parser.add_argument("--max-pnp-reprojection-median", default=3.0, type=float)
-    parser.add_argument("--max-translation-step", default=0.5, type=float)
-    parser.add_argument("--max-rotation-step-deg", default=15.0, type=float)
-
-    parser.add_argument("--pnp-reprojection-error", default=3.0, type=float)
-    parser.add_argument("--pnp-confidence", default=0.999, type=float)
-    parser.add_argument("--pnp-iterations", default=100, type=int)
-
-    parser.add_argument("--display", action="store_true")
-    parser.add_argument("--display-delay-ms", default=1, type=int)
-
-    parser.add_argument("--save-debug", action="store_true")
-    parser.add_argument(
-        "--debug-dir",
-        default=Path("outputs/stereo_pnp_vo/debug"),
-        type=Path,
-    )
-
-    parser.add_argument(
-        "--output-dir",
-        default=Path("outputs/stereo_pnp_vo"),
-        type=Path,
-    )
-
-    return parser.parse_args()
-
-
 def print_frame_result(frame_index: int, result) -> None:
     t = result.T_W_Cleft[:3, 3]
 
@@ -326,6 +227,21 @@ def draw_status_bar(image: np.ndarray, result) -> None:
         f"err={format_value(result.reprojection_error_median)}"
     )
     draw_text_bar(image, text)
+
+
+def parse_args() -> tuple:
+    parser = verification_parser(
+        "Run stereo PnP visual odometry on EvSLAM data."
+    )
+    parser.add_argument("--display", action="store_true")
+    parser.add_argument("--display-delay-ms", default=1, type=int)
+    parser.add_argument("--save-debug", action="store_true")
+    parser.add_argument(
+        "--debug-dir",
+        default=Path("outputs/stereo_pnp_vo/debug"),
+        type=Path,
+    )
+    return load_args(parser)
 
 
 if __name__ == "__main__":

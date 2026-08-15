@@ -66,6 +66,7 @@ class StereoDepthEstimator:
         max_depth: float | None = 100.0,
         lk_win_size: tuple = (21, 21),
         lk_max_level: int = 3,
+        lr_consistency_threshold: float | None = None,
     ) -> None:
         self.P1 = as_float_array(P1, (3, 4), "P1")
         self.P2 = as_float_array(P2, (3, 4), "P2")
@@ -75,6 +76,11 @@ class StereoDepthEstimator:
         self.max_disparity = None if max_disparity is None else float(max_disparity)
         self.min_depth = float(min_depth)
         self.max_depth = None if max_depth is None else float(max_depth)
+        self.lr_consistency_threshold = (
+            None
+            if lr_consistency_threshold is None
+            else float(lr_consistency_threshold)
+        )
 
         self.lk_params = {
             "winSize": tuple(lk_win_size),
@@ -122,6 +128,24 @@ class StereoDepthEstimator:
         match_mask = status.reshape(-1).astype(np.bool_)
         match_mask &= self._inside_image(left_xy, left_gray.shape)
         match_mask &= self._inside_image(right_xy, right_gray.shape)
+
+        if self.lr_consistency_threshold is not None:
+            back_lk, back_status, _ = cv2.calcOpticalFlowPyrLK(
+                right_gray,
+                left_gray,
+                right_lk,
+                None,
+                **self.lk_params,
+            )
+            if back_lk is None or back_status is None:
+                match_mask[:] = False
+            else:
+                back_xy = as_points_xy(back_lk)
+                match_mask &= back_status.reshape(-1).astype(np.bool_)
+                match_mask &= (
+                    np.linalg.norm(left_xy - back_xy, axis=1)
+                    <= self.lr_consistency_threshold
+                )
 
         epipolar_error = np.full(input_count, np.nan, dtype=np.float64)
         disparity = np.full(input_count, np.nan, dtype=np.float64)

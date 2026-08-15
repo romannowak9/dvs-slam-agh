@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
 import sys
 
@@ -27,6 +26,7 @@ from event_slam.core.imu import (
 from event_slam.core.trajectory import Trajectory
 from event_slam.io.result_io import load_evslam_result
 from event_slam.datasets.evslam_reader import EvSlamRosbagReader
+from verification_config import load_args, verification_parser
 
 
 R_OUT_FROM_PNP_CAMERA = np.array(
@@ -40,7 +40,7 @@ R_OUT_FROM_PNP_CAMERA = np.array(
 
 
 def main() -> None:
-    args = parse_args()
+    _, args = parse_args()
 
     stereo = load_stereo_calibration(args.camera_calibration)
     imu_calibration = load_imu_calibration(args.imu_calibration)
@@ -82,75 +82,6 @@ def main() -> None:
 
     if args.csv is not None:
         save_csv(args.csv, rows)
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Compare relative rotations estimated from VO/PnP poses with "
-            "relative rotations integrated from IMU gyroscope measurements."
-        )
-    )
-
-    parser.add_argument(
-        "--bag",
-        type=Path,
-        required=True,
-        help="Input EvSLAM rosbag.",
-    )
-    parser.add_argument(
-        "--camera-calibration",
-        type=Path,
-        required=True,
-        help="Kalibr camera calibration YAML.",
-    )
-    parser.add_argument(
-        "--imu-calibration",
-        type=Path,
-        required=True,
-        help="Kalibr IMU calibration YAML.",
-    )
-    parser.add_argument(
-        "--estimate",
-        type=Path,
-        required=True,
-        help="EvSLAM VO result file: timestamp tx ty tz qx qy qz qw vx vy vz.",
-    )
-    parser.add_argument(
-        "--imu-topic",
-        type=str,
-        default=None,
-        help="IMU topic. If omitted, rostopic from IMU calibration is used.",
-    )
-    parser.add_argument(
-        "--extra-timeshift",
-        type=float,
-        default=0.0,
-        help=(
-            "Additional time shift added to timeshift_cam_imu. Useful for "
-            "diagnosing temporal calibration."
-        ),
-    )
-    parser.add_argument(
-        "--max-pairs",
-        type=int,
-        default=0,
-        help="Maximum number of consecutive pose pairs to compare. 0 means all.",
-    )
-    parser.add_argument(
-        "--preview-count",
-        type=int,
-        default=8,
-        help="Number of first diagnostic rows printed to the console.",
-    )
-    parser.add_argument(
-        "--csv",
-        type=Path,
-        default=None,
-        help="Optional CSV output path for per-pair diagnostics.",
-    )
-
-    return parser.parse_args()
 
 
 def compute_rotation_diagnostics(
@@ -282,6 +213,18 @@ def save_csv(path: Path, rows: np.ndarray) -> None:
         ),
         comments="",
     )
+
+
+def parse_args() -> tuple:
+    parser = verification_parser(
+        "Compare relative rotations estimated from poses and IMU."
+    )
+    parser.add_argument("--estimate", type=Path, required=True)
+    parser.add_argument("--extra-timeshift", default=0.0, type=float)
+    parser.add_argument("--max-pairs", default=0, type=int)
+    parser.add_argument("--preview-count", default=8, type=int)
+    parser.add_argument("--csv", default=None, type=Path)
+    return load_args(parser)
 
 
 if __name__ == "__main__":

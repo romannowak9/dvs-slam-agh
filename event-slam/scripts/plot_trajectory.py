@@ -209,49 +209,18 @@ def main() -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Plot VO trajectory and velocity from EvSLAM result files."
+        description="Plot trajectory and velocity from EvSLAM result files."
     )
-
-    parser.add_argument(
-"--trajectory",
-        required=True,
-        type=Path,
-        help="Path to estimated trajectory in EvSLAM result format.",
-    )
-
-    parser.add_argument(
-        "--gt",
-        default=None,
-        type=Path,
-        help="Optional ground-truth trajectory in the same EvSLAM result format.",
-    )
-
+    parser.add_argument("--trajectory", required=True, type=Path)
+    parser.add_argument("--gt", default=None, type=Path)
     parser.add_argument(
         "--output-dir",
         default=Path("outputs/trajectory_plots"),
         type=Path,
-        help="Directory where plots will be saved.",
     )
-
-    parser.add_argument(
-        "--prefix",
-        default="trajectory",
-        help="Output file prefix.",
-    )
-
-    parser.add_argument(
-        "--format",
-        default="png",
-        choices=["png", "pdf", "svg"],
-        help="Output plot format.",
-    )
-
-    parser.add_argument(
-        "--absolute-time",
-        action="store_true",
-        help="Use absolute timestamps on x axis instead of time from start.",
-    )
-
+    parser.add_argument("--prefix", default="trajectory")
+    parser.add_argument("--format", default="png", choices=["png", "pdf", "svg"])
+    parser.add_argument("--absolute-time", action="store_true")
     return parser.parse_args()
 
 

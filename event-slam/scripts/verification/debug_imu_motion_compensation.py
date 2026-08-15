@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 
@@ -21,30 +20,23 @@ from event_slam.calibration.kalibr_parser import (
     load_stereo_calibration,
 )
 from event_slam.core.imu import ImuCoverageError
-from event_slam.datasets.evslam_reader import (
-    DEFAULT_LEFT_EVENT_TOPIC,
-    DEFAULT_RIGHT_EVENT_TOPIC,
-    EvSlamRosbagReader,
-)
+from event_slam.datasets.evslam_reader import EvSlamRosbagReader
 from event_slam.debug.visualization import (
     colorize_event_frame,
     save_image,
     show_image,
 )
-from event_slam.events.event_aggregator import (
-    EventFrameAggregator,
-    EventFrameMode,
-    PolarityMode,
-)
+from event_slam.events.event_aggregator import EventFrameAggregator
 from event_slam.events.event_filter import StereoBackgroundActivityFilter
 from event_slam.events.event_window import StereoEventWindowBuilder
 from event_slam.events.imu_motion_compensation import (
     compensate_stereo_window_rotation,
 )
+from verification_config import load_args, verification_parser
 
 
 def main() -> None:
-    args = parse_args()
+    _, args = parse_args()
 
     stereo_calibration = load_stereo_calibration(args.camera_calibration)
     imu_calibration = load_imu_calibration(args.imu_calibration)
@@ -186,87 +178,20 @@ def main() -> None:
         print(f"output_dir: {args.output_dir}")
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Compare event frames before and after IMU rotational motion "
-            "compensation."
-        )
-    )
-
-    parser.add_argument("--bag", required=True, type=Path)
-    parser.add_argument("--camera-calibration", required=True, type=Path)
-    parser.add_argument("--imu-calibration", required=True, type=Path)
-
-    parser.add_argument("--left-topic", default=DEFAULT_LEFT_EVENT_TOPIC)
-    parser.add_argument("--right-topic", default=DEFAULT_RIGHT_EVENT_TOPIC)
-    parser.add_argument("--imu-topic", default=None, type=str)
-
-    parser.add_argument("--time-window", default=0.0333333333, type=float)
-    parser.add_argument(
-        "--num-frames",
-        default=20,
-        type=int,
-        help="Number of frames to process. Use 0 to process the whole bag.",
+def parse_args() -> tuple:
+    parser = verification_parser(
+        "Compare event frames before and after IMU rotation compensation."
     )
     parser.add_argument("--height", default=480, type=int)
     parser.add_argument("--width", default=640, type=int)
-
-    parser.add_argument(
-        "--mode",
-        default=EventFrameMode.STANDARD.value,
-        choices=[mode.value for mode in EventFrameMode],
-        help="Event frame aggregation mode.",
-    )
-    parser.add_argument(
-        "--polarity-mode",
-        default=PolarityMode.BOTH.value,
-        choices=[mode.value for mode in PolarityMode],
-        help="Which event polarities should be rendered.",
-    )
-    parser.add_argument("--tau", default=0.03, type=float)
-
-    parser.add_argument(
-        "--reference-time",
-        default="middle",
-        choices=["start", "middle", "end"],
-    )
-    parser.add_argument("--time-bins", default=32, type=int)
     parser.add_argument("--extra-timeshift", default=0.0, type=float)
-    parser.add_argument("--use-baf", action="store_true")
-    parser.add_argument("--baf-time-window", default=1.0 / 24.0, type=float)
-    parser.add_argument("--baf-radius", default=2, type=int)
-    parser.add_argument("--baf-min-neighbors", default=1, type=int)
-
-    parser.add_argument("--t-start", default=None, type=float)
-    parser.add_argument("--t-end", default=None, type=float)
-
-    parser.add_argument(
-        "--output-dir",
-        default="outputs/debug_imu_motion_compensation",
-        type=Path,
-    )
-    parser.add_argument(
-        "--save-preview",
-        action="store_true",
-        help="Save side-by-side comparison images.",
-    )
-    parser.add_argument(
-        "--display",
-        action="store_true",
-        help="Display comparison images instead of saving images.",
-    )
-    parser.add_argument(
-        "--display-delay-ms",
-        default=1,
-        type=int,
-        help="Delay for cv2.waitKey in display mode. Use 0 to step frame by frame.",
-    )
-
-    return parser.parse_args()
+    parser.add_argument("--save-preview", action="store_true")
+    parser.add_argument("--display", action="store_true")
+    parser.add_argument("--display-delay-ms", default=1, type=int)
+    return load_args(parser)
 
 
-def setup_output_paths(args: argparse.Namespace) -> dict:
+def setup_output_paths(args) -> dict:
     if args.display:
         return {}
 

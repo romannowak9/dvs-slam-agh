@@ -76,63 +76,18 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Compute EvSLAM ATE and velocity AUC metrics."
     )
-
-    parser.add_argument(
-        "--estimate",
-        required=True,
-        type=Path,
-        help="Estimated trajectory in EvSLAM result format.",
-    )
-
-    parser.add_argument(
-        "--gt",
-        required=True,
-        type=Path,
-        help="Ground-truth trajectory in EvSLAM result format.",
-    )
-
+    parser.add_argument("--estimate", required=True, type=Path)
+    parser.add_argument("--gt", required=True, type=Path)
     parser.add_argument(
         "--output",
         default=Path("outputs/evslam_metrics.txt"),
         type=Path,
-        help="Output TXT file with computed metrics.",
     )
-
-    parser.add_argument(
-        "--xi-min",
-        default=0.0,
-        type=float,
-        help="Minimum RVE threshold for AUC integration.",
-    )
-
-    parser.add_argument(
-        "--xi-max",
-        default=1.0,
-        type=float,
-        help="Maximum RVE threshold for AUC integration.",
-    )
-
-    parser.add_argument(
-        "--xi-count",
-        default=1001,
-        type=int,
-        help="Number of RVE thresholds used for AUC integration.",
-    )
-
-    parser.add_argument(
-        "--min-speed",
-        default=1e-6,
-        type=float,
-        help="Minimum GT speed used to avoid division by zero in RVE.",
-    )
-
-    parser.add_argument(
-        "--timestamp-tolerance",
-        default=1e-6,
-        type=float,
-        help="Allowed timestamp mismatch between estimate and GT.",
-    )
-
+    parser.add_argument("--xi-min", default=0.0, type=float)
+    parser.add_argument("--xi-max", default=1.0, type=float)
+    parser.add_argument("--xi-count", default=1001, type=int)
+    parser.add_argument("--min-speed", default=1e-6, type=float)
+    parser.add_argument("--timestamp-tolerance", default=1e-6, type=float)
     return parser.parse_args()
 
 

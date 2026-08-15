@@ -107,47 +107,17 @@ def main() -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=(
-            "Align an EvSLAM estimated trajectory to GT and write a new "
-            "EvSLAM result file."
-        )
+        description="Align an EvSLAM estimated trajectory to ground truth."
     )
-
-    parser.add_argument(
-        "--estimate",
-        type=Path,
-        required=True,
-        help="Estimated EvSLAM result file: timestamp tx ty tz qx qy qz qw vx vy vz",
-    )
-    parser.add_argument(
-        "--gt",
-        type=Path,
-        required=True,
-        help="Ground-truth EvSLAM file with the same 11-column format.",
-    )
-    parser.add_argument(
-        "--output",
-        type=Path,
-        required=True,
-        help="Output aligned EvSLAM result file.",
-    )
+    parser.add_argument("--estimate", type=Path, required=True)
+    parser.add_argument("--gt", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
         "--method",
         choices=["se3", "sim3", "first_pose"],
         default="se3",
-        help=(
-            "'se3' fits one rigid transform to all matched positions. "
-            "'sim3' fits scale, rotation and translation. "
-            "'first_pose' aligns only the first matched pose."
-        ),
     )
-    parser.add_argument(
-        "--timestamp-tolerance",
-        type=float,
-        default=1e-3,
-        help="Maximum allowed timestamp mismatch in seconds.",
-    )
-
+    parser.add_argument("--timestamp-tolerance", type=float, default=1e-3)
     return parser.parse_args()
 
 
