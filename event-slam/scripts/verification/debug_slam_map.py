@@ -138,6 +138,7 @@ class SlamMapVisualizer:
             descriptor_match_counts=np.asarray(
                 [item.map_descriptor_match_count for item in results]
             ),
+            loop_accepted=np.asarray([item.loop_accepted for item in results]),
             path=self.output_dir / "tracking_diagnostics.png",
         )
 

@@ -27,6 +27,13 @@ docker run -it \
   bash
 ```
 
+Install additionall reqs
+```
+apt-get install -y --no-install-recommends python3-pip python3-h5py
+python3 -m pip install --no-deps scipy==1.7.3
+```
+
+
 To delete this configuration
 ```bash
 docker rm -f event-slam-dev
@@ -54,8 +61,6 @@ Attach VSCode to running container and source:
 ```bash
 source /opt/ros/noetic/setup.bash
 cd /workspace/event-slam
-apt-get install -y --no-install-recommends python3-pip python3-h5py
-python3 -m pip install --no-deps scipy==1.7.3
 ```
 
 `--no-deps` keeps the container's NumPy 1.17.4 unchanged.
@@ -71,5 +76,5 @@ The same runner processes M3ED H5 without converting it to a ROS bag:
 
 ```bash
 python3 scripts/run_event_slam.py \
-  --config configs/m3ed_falcon_fast_flight_2_slam.yaml
+  --config configs/m3ed_falcon_indoor_flight_1_slam.yaml
 ```

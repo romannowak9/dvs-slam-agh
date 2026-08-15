@@ -51,6 +51,7 @@ def main() -> None:
         descriptor_match_counts=_values(
             trajectory, "map_descriptor_match_count", int
         ),
+        loop_accepted=_values(trajectory, "loop_accepted", int),
         path=output_dir / "tracking_diagnostics.png",
     )
 
