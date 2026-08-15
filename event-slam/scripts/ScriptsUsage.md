@@ -84,7 +84,7 @@ Create only `map_3d.png` and `tracking_diagnostics.png` from saved CSV files:
 
 ```bash
 python3 scripts/verification/plot_slam_map_results.py \
-  outputs/evslam_seq007_slam_stage_2_full
+  outputs/m3ed_falcon_indoor_flight_1_slam_loop_fix_try2
 ```
 
 ## Result analysis
@@ -127,14 +127,14 @@ python3 scripts/align_m3ed_result_to_gt.py \
   --method se3
 
 python3 scripts/plot_m3ed_trajectory.py \
-  --trajectory outputs/example/result_aligned_se3.txt \
-  --gt /data/m3ed/gt/falcon_outdoor_day_fast_flight_2_pose_evo_gt.txt \
-  --output-dir outputs/example/plots_se3
+  --trajectory outputs/m3ed_falcon_indoor_flight_1_slam_loop_fix/falcon_indoor_flight_1.txt \
+  --gt /data/m3ed/gt/falcon_indoor_flight_1_pose_evo_gt.txt \
+  --output-dir outputs/m3ed_falcon_indoor_flight_1_slam_loop_fix/plots
 
 python3 scripts/evaluate_m3ed_metrics.py \
-  --estimate outputs/example/result_aligned_se3.txt \
-  --gt /data/m3ed/gt/falcon_outdoor_day_fast_flight_2_pose_evo_gt.txt \
-  --output outputs/example/metrics_se3.txt
+  --estimate outputs/m3ed_falcon_indoor_flight_1_slam_try3/falcon_indoor_flight_1.txt \
+  --gt /data/m3ed/gt/falcon_indoor_flight_1_pose_evo_gt.txt \
+  --output outputs/m3ed_falcon_indoor_flight_1_slam_try3/metrics_se3.txt
 ```
 
 ## Main SLAM runner
