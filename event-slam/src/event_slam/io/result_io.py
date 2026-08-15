@@ -138,7 +138,8 @@ def write_vo_csv(results, path) -> None:
             "tracking_state,reference_keyframe_id,is_keyframe,"
             "loop_candidate_count,loop_candidate_id,loop_match_count,"
             "loop_accepted,relocalized,graph_cost_before,graph_cost_after,"
-            "loop_relative_scale\n"
+            "loop_pnp_point_count,loop_inlier_count,loop_inlier_ratio,"
+            "loop_reprojection_error_median,loop_pnp_message\n"
         )
 
         for result in results:
@@ -178,7 +179,11 @@ def write_vo_csv(results, path) -> None:
                 f"{int(result.relocalized)},"
                 f"{result.graph_cost_before:.9f},"
                 f"{result.graph_cost_after:.9f},"
-                f"{result.loop_relative_scale:.9f}\n"
+                f"{result.loop_pnp_point_count},"
+                f"{result.loop_inlier_count},"
+                f"{result.loop_inlier_ratio:.9f},"
+                f"{result.loop_reprojection_error_median:.9f},"
+                f"{_csv_safe(result.loop_pnp_message)}\n"
             )
 
 

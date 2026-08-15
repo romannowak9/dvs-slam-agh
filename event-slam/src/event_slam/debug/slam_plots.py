@@ -16,7 +16,6 @@ POSE_SOURCES = (
     "vo_fallback",
     "map",
     "relocalization",
-    "initialization",
 )
 
 
@@ -84,12 +83,15 @@ def save_tracking_diagnostics_plot(
     pnp_inlier_counts: np.ndarray,
     pose_sources: np.ndarray,
     descriptor_match_counts: np.ndarray,
+    loop_accepted: np.ndarray,
     path: Path,
 ) -> Path:
     """Plot map correspondences and the selected pose source per frame."""
     frames = np.arange(len(track_counts))
     source_levels = {name: index for index, name in enumerate(POSE_SOURCES)}
-    source_values = np.asarray([source_levels[name] for name in pose_sources])
+    source_values = np.asarray(
+        [source_levels.get(name, np.nan) for name in pose_sources]
+    )
 
     figure, axes = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
     axes[0].plot(frames, track_counts, label="tracked features")
@@ -120,6 +122,17 @@ def save_tracking_diagnostics_plot(
         s=60,
         color="red",
         label="ORB recovery",
+    )
+    loop_frames = np.flatnonzero(np.asarray(loop_accepted, dtype=bool))
+    axes[1].scatter(
+        loop_frames,
+        source_values[loop_frames],
+        marker="*",
+        s=180,
+        color="gold",
+        edgecolor="black",
+        label="loop closure",
+        zorder=3,
     )
     axes[1].set_yticks(list(source_levels.values()))
     axes[1].set_yticklabels(list(source_levels))

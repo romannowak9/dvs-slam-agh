@@ -58,8 +58,12 @@ class StereoPnPSLAMResult:
     loop_candidate_count: int = 0
     loop_candidate_id: int = -1
     loop_match_count: int = 0
+    loop_pnp_point_count: int = 0
+    loop_inlier_count: int = 0
+    loop_inlier_ratio: float = np.nan
+    loop_reprojection_error_median: float = np.nan
+    loop_pnp_message: str = ""
     loop_accepted: bool = False
-    loop_relative_scale: float = np.nan
     relocalized: bool = False
     graph_cost_before: float = np.nan
     graph_cost_after: float = np.nan

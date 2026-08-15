@@ -17,6 +17,10 @@ class Keyframe:
     points_C: np.ndarray
     descriptors: np.ndarray
     landmark_ids: np.ndarray
+    place_points_2d: np.ndarray
+    place_points_C: np.ndarray
+    place_descriptors: np.ndarray
+    place_signature: np.ndarray
 
     @property
     def point_count(self) -> int:
@@ -153,6 +157,10 @@ class SparseMap:
         points_C: np.ndarray,
         descriptors: np.ndarray,
         track_ids: np.ndarray,
+        place_points_2d: np.ndarray,
+        place_points_C: np.ndarray,
+        place_descriptors: np.ndarray,
+        place_signature: np.ndarray,
     ) -> Keyframe:
         keyframe_id = len(self.keyframes)
         positions_W = transform_points(T_W_C, points_C)
@@ -204,6 +212,10 @@ class SparseMap:
             points_C=np.asarray(points_C, dtype=np.float64).copy(),
             descriptors=np.asarray(descriptors, dtype=np.uint8).copy(),
             landmark_ids=landmark_ids,
+            place_points_2d=np.asarray(place_points_2d, dtype=np.float32).copy(),
+            place_points_C=np.asarray(place_points_C, dtype=np.float64).copy(),
+            place_descriptors=np.asarray(place_descriptors, dtype=np.uint8).copy(),
+            place_signature=np.asarray(place_signature, dtype=np.float32).copy(),
         )
         self.keyframes.append(keyframe)
         return keyframe

@@ -143,8 +143,6 @@ class StereoPnPSLAM:
             loop_cfg.get("enabled", True)
         )
         self.loop_min_keyframe_gap = int(loop_cfg.get("min_keyframe_gap", 20))
-        self.loop_candidates_per_frame = int(loop_cfg.get("candidates_per_frame", 15))
-        self.loop_candidate_check_index = 0
         self.loop_min_interval = max(
             1,
             int(loop_cfg.get("min_keyframes_between_loops", 10)),
@@ -173,12 +171,11 @@ class StereoPnPSLAM:
             max_reprojection_median=loop_cfg.get(
                 "max_reprojection_median", 3.0
             ),
-            min_scale_error_reduction=loop_cfg.get(
-                "min_scale_error_reduction", 0.2
-            ),
             pnp_reprojection_error=pnp_reprojection_error,
             pnp_confidence=pnp_confidence,
             pnp_iterations=pnp_iterations,
+            max_features=loop_cfg.get("max_features", 1500),
+            max_depth=self.max_landmark_depth,
         )
 
         self.reset()
@@ -265,7 +262,12 @@ class StereoPnPSLAM:
             )
 
             self._set_frame_reference(result)
-            self._update_map(left_rectified, tracking_result, result)
+            self._update_map(
+                left_rectified,
+                right_rectified,
+                tracking_result,
+                result,
+            )
             self._append_result(result)
             return result
 
@@ -278,11 +280,22 @@ class StereoPnPSLAM:
         )
 
         self._set_frame_reference(result)
-        self._update_map(left_rectified, tracking_result, result)
+        self._update_map(
+            left_rectified,
+            right_rectified,
+            tracking_result,
+            result,
+        )
         self._append_result(result)
         return result
 
-    def _update_map(self, left_rectified, tracking_result, result) -> None:
+    def _update_map(
+        self,
+        left_rectified,
+        right_rectified,
+        tracking_result,
+        result,
+    ) -> None:
         if self.map is None or not result.success:
             return
 
@@ -290,22 +303,21 @@ class StereoPnPSLAM:
         if not self._should_create_keyframe(frame_index, tracking_result.active_ids):
             return
 
+        place = self.place_recognizer.observe(
+            left_rectified,
+            right_rectified,
+            self.depth_estimator,
+        )
         descriptors, indices = self.tracker.describe(
             left_rectified,
             tracking_result.active_points,
         )
-        if len(indices) == 0:
-            return
-
         points_3d_rect = self.prev_points_3d_rect[indices]
         valid = np.isfinite(points_3d_rect).all(axis=1)
         valid[valid] = (
             (points_3d_rect[valid, 2] > 0.0)
             & (points_3d_rect[valid, 2] <= self.max_landmark_depth)
         )
-        if not np.any(valid):
-            return
-
         previous_keyframe = self.map.last_keyframe
         keyframe = self.map.add_keyframe(
             frame_index=frame_index,
@@ -315,6 +327,10 @@ class StereoPnPSLAM:
             points_C=self._rectified_points_to_output_camera(points_3d_rect[valid]),
             descriptors=descriptors[valid],
             track_ids=tracking_result.active_ids[indices][valid],
+            place_points_2d=place.points_2d,
+            place_points_C=place.points_C,
+            place_descriptors=place.descriptors,
+            place_signature=place.signature,
         )
         self.map.prune_landmarks(self.local_matcher.keyframe_count)
         result.is_keyframe = True
@@ -352,36 +368,13 @@ class StereoPnPSLAM:
         if keyframe.id < self.last_loop_keyframe_id + self.loop_min_interval:
             return
 
-        num_candidates = last_candidate_id + 1
-
-        current_pos = result.T_W_Cleft[:3, 3]
-        distances = []
-        for cid in range(num_candidates):
-            cand_pos = self.map.keyframes[cid].T_W_C[:3, 3]
-            distances.append((float(np.linalg.norm(cand_pos - current_pos)), cid))
-
-        distances.sort()
-        spatial_candidates = [cid for _, cid in distances[:self.loop_candidates_per_frame]]
-
-        round_robin_count = self.loop_candidates_per_frame // 2
-        start_idx = self.loop_candidate_check_index % num_candidates
-        end_idx = start_idx + round_robin_count
-
-        if end_idx <= num_candidates:
-            rr_candidates = list(range(start_idx, end_idx))
-            self.loop_candidate_check_index = end_idx
-        else:
-            rr_candidates = list(range(start_idx, num_candidates)) + list(range(0, end_idx - num_candidates))
-            self.loop_candidate_check_index = end_idx - num_candidates
-
-        candidate_ids = list(set(spatial_candidates + rr_candidates))
-
         recognition = self.place_recognizer.recognize(
-            points_2d=keyframe.points_2d,
-            descriptors=keyframe.descriptors,
+            points_2d=keyframe.place_points_2d,
+            descriptors=keyframe.place_descriptors,
             sparse_map=self.map,
-            candidate_ids=candidate_ids,
-            points_C=keyframe.points_C,
+            candidate_ids=range(last_candidate_id + 1),
+            points_C=keyframe.place_points_C,
+            signature=keyframe.place_signature,
         )
         result.loop_candidate_count = len(recognition.candidates)
         if recognition.candidates:
@@ -395,9 +388,17 @@ class StereoPnPSLAM:
         solution = verification.solution
         candidate_id = verification.candidate.keyframe_id
         result.loop_candidate_id = candidate_id
-        result.loop_match_count = verification.candidate.match_count
+        result.loop_match_count = verification.descriptor_match_count
+        result.loop_pnp_point_count = len(solution.inlier_mask)
+        result.loop_inlier_count = int(np.count_nonzero(solution.inlier_mask))
+        result.loop_inlier_ratio = result.loop_inlier_count / max(
+            1, result.loop_pnp_point_count
+        )
+        result.loop_reprojection_error_median = solution.reprojection_error_median
+        result.loop_pnp_message = solution.message
+        if not solution.success:
+            return
         result.loop_accepted = True
-        result.loop_relative_scale = verification.relative_scale
         self.last_loop_keyframe_id = keyframe.id
         self.pose_graph.add_edge(
             candidate_id,
@@ -534,28 +535,21 @@ class StereoPnPSLAM:
         if not solution.success:
             relocalization = self._try_relocalization(
                 left_rectified,
-                tracking_result,
+                right_rectified,
             )
             if relocalization is not None:
-                verification, described_indices = relocalization
+                verification, place = relocalization
                 solution = verification.solution
                 current_indices = verification.candidate.current_indices
-                pnp_image_points = tracking_result.active_points[
-                    described_indices[current_indices]
-                ].astype(np.float64)
+                pnp_image_points = place.points_2d[current_indices].astype(
+                    np.float64
+                )
                 candidate = self.map.keyframes[
                     verification.candidate.keyframe_id
                 ]
                 relocalization_keyframe_id = candidate.id
                 self.T_W_Cleft = candidate.T_W_C @ invert_transform(
                     solution.T_Ck_Cprev
-                )
-                inliers = solution.inlier_mask
-                self.map.associate_tracks(
-                    tracking_result.active_ids[
-                        described_indices[current_indices]
-                    ][inliers],
-                    verification.landmark_ids[inliers],
                 )
                 pose_source = "relocalization"
                 relocalized = True
@@ -658,7 +652,7 @@ class StereoPnPSLAM:
             relocalized=relocalized,
         )
 
-    def _try_relocalization(self, image, tracking_result):
+    def _try_relocalization(self, left_image, right_image):
         if (
             not self.relocalization_enabled
             or self.map is None
@@ -667,22 +661,28 @@ class StereoPnPSLAM:
         ):
             return None
 
-        descriptors, described_indices = self.tracker.describe(
-            image,
-            tracking_result.active_points,
+        place = self.place_recognizer.observe(
+            left_image,
+            right_image,
+            self.depth_estimator,
         )
-        if len(described_indices) == 0:
+        if len(place.descriptors) == 0:
             return None
 
         recognition = self.place_recognizer.recognize(
-            points_2d=tracking_result.active_points[described_indices],
-            descriptors=descriptors,
+            points_2d=place.points_2d,
+            descriptors=place.descriptors,
             sparse_map=self.map,
             candidate_ids=range(len(self.map.keyframes)),
+            points_C=place.points_C,
+            signature=place.signature,
         )
-        if recognition.verification is None:
+        if (
+            recognition.verification is None
+            or not recognition.verification.solution.success
+        ):
             return None
-        return recognition.verification, described_indices
+        return recognition.verification, place
 
     def _make_pnp_correspondences(self, tracking_result) -> tuple:
         if len(self.prev_points_3d_rect) == 0:
@@ -696,7 +696,8 @@ class StereoPnPSLAM:
         object_points = self.prev_points_3d_rect[status_mask]
         image_points = tracking_result.curr_points
         valid_mask = np.isfinite(object_points).all(axis=1)
-        valid_mask &= object_points[:, 2] > 0.0
+        finite_indices = np.flatnonzero(valid_mask)
+        valid_mask[finite_indices] &= object_points[finite_indices, 2] > 0.0
 
         return (
             object_points[valid_mask].astype(np.float64),
