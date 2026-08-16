@@ -303,52 +303,70 @@ def plot_trajectory_3d(
     estimated: TrajectoryPlotData,
     ground_truth: TrajectoryPlotData | None,
     output_path: Path,
+    axis_order=(0, 1, 2),
+    axis_signs=(1.0, 1.0, 1.0),
 ) -> Path:
+    axis_signs = np.asarray(axis_signs, dtype=np.float64)
+    estimated_positions = estimated.positions[:, axis_order] * axis_signs
+    gt_positions = (
+        ground_truth.positions[:, axis_order] * axis_signs
+        if ground_truth is not None
+        else None
+    )
     fig = plt.figure(figsize=(8.0, 7.0))
     ax = fig.add_subplot(111, projection="3d")
 
     ax.plot(
-        estimated.positions[:, 0],
-        estimated.positions[:, 1],
-        estimated.positions[:, 2],
+        estimated_positions[:, 0],
+        estimated_positions[:, 1],
+        estimated_positions[:, 2],
+        color="C0",
         linewidth=1.5,
         label=estimated.label,
     )
 
-    if ground_truth is not None:
+    if gt_positions is not None:
         ax.plot(
-            ground_truth.positions[:, 0],
-            ground_truth.positions[:, 1],
-            ground_truth.positions[:, 2],
+            gt_positions[:, 0],
+            gt_positions[:, 1],
+            gt_positions[:, 2],
+            color="C1",
             linewidth=1.2,
             linestyle="--",
             label=ground_truth.label,
         )
 
     ax.scatter(
-        estimated.positions[0, 0],
-        estimated.positions[0, 1],
-        estimated.positions[0, 2],
+        estimated_positions[0, 0],
+        estimated_positions[0, 1],
+        estimated_positions[0, 2],
+        color="C0",
         marker="o",
         label="start",
     )
 
     ax.scatter(
-        estimated.positions[-1, 0],
-        estimated.positions[-1, 1],
-        estimated.positions[-1, 2],
+        estimated_positions[-1, 0],
+        estimated_positions[-1, 1],
+        estimated_positions[-1, 2],
+        color="C0",
         marker="x",
         label="end",
     )
 
     ax.set_title("3D trajectory")
-    ax.set_xlabel("x [m]")
-    ax.set_ylabel("y [m]")
-    ax.set_zlabel("z [m]")
+    axis_names = "xyz"
+    labels = [
+        f"{'-' if sign < 0.0 else ''}{axis_names[index]} [m]"
+        for index, sign in zip(axis_order, axis_signs)
+    ]
+    ax.set_xlabel(labels[0])
+    ax.set_ylabel(labels[1])
+    ax.set_zlabel(labels[2])
 
-    all_positions = estimated.positions
-    if ground_truth is not None:
-        all_positions = np.vstack((all_positions, ground_truth.positions))
+    all_positions = estimated_positions
+    if gt_positions is not None:
+        all_positions = np.vstack((all_positions, gt_positions))
 
     set_axes_equal_3d(ax, all_positions)
 

@@ -94,21 +94,25 @@ arguments:
 
 ```bash
 python3 scripts/align_evslam_result_to_gt.py \
-  --estimate outputs/example/result_seq007.txt \
+  --estimate outputs/evslam_seq007_slam_imu_rot/result_seq007.txt \
   --gt /data/evSLAM/gt/seq007_test_gt.txt \
-  --output outputs/example/result_seq007_aligned_se3.txt \
-  --method se3
+  --output outputs/evslam_seq007_slam_imu_rot/result_seq007_first_pose.txt \
+  --method first_pose
 
 python3 scripts/plot_trajectory.py \
-  --trajectory outputs/example/result_seq007_aligned_se3.txt \
+  --trajectory outputs/evslam_seq007_slam_imu_rot/result_seq007_first_pose.txt \
   --gt /data/evSLAM/gt/seq007_test_gt.txt \
-  --output-dir outputs/example/plots
+  --output-dir outputs/evslam_seq007_slam_imu_rot/plots
 
 python3 scripts/evaluate_evslam_metrics.py \
   --estimate outputs/example/result_seq007_aligned_se3.txt \
   --gt /data/evSLAM/gt/seq007_test_gt.txt \
   --output outputs/example/metrics.txt
 ```
+
+The EvSLAM report contains the challenge metrics (mean ATE and speed-weighted
+RVE AUC), position RMSE and fixed-time-delta translational/rotational RPE.
+RPE uses a 1 s interval by default; change it with `--rpe-delta-seconds`.
 
 M3ED uses separate analysis scripts because its challenge files contain poses
 only (`timestamp tx ty tz qx qy qz qw`). The plotting script derives smoothed
@@ -136,6 +140,10 @@ python3 scripts/evaluate_m3ed_metrics.py \
   --gt /data/m3ed/gt/falcon_indoor_flight_1_pose_evo_gt.txt \
   --output outputs/m3ed_falcon_indoor_flight_1_slam_try3/metrics_se3.txt
 ```
+
+The M3ED evaluator expects a trajectory already aligned with the selected
+`first_pose`, SE(3) or Sim(3) protocol. It reports translational APE,
+orientation error and fixed-time-delta RPE (1 s by default).
 
 ## Main SLAM runner
 

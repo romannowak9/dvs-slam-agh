@@ -6,11 +6,14 @@ import argparse
 import sys
 from pathlib import Path
 
+import numpy as np
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 
 from align_m3ed_result_to_gt import load_m3ed_trajectory
+from event_slam.core.trajectory import Trajectory
 from event_slam.core.velocity import compute_velocity_trajectory
 from plot_trajectory import (
     TrajectoryPlotData,
@@ -22,7 +25,10 @@ from plot_trajectory import (
 def main() -> None:
     args = parse_args()
     estimate = load_plot_data(args.trajectory, "estimated")
-    ground_truth = load_plot_data(args.gt, "ground truth")
+    ground_truth = trim_to_estimate(
+        load_plot_data(args.gt, "ground truth"),
+        estimate,
+    )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     time_origin = 0.0 if args.absolute_time else estimate.timestamps[0]
     xlabel = "Timestamp [s]" if args.absolute_time else "Time from start [s]"
@@ -52,6 +58,8 @@ def main() -> None:
         estimate,
         ground_truth,
         args.output_dir / f"{args.prefix}_3d.png",
+        axis_order=(0, 2, 1),
+        axis_signs=(1.0, -1.0, 1.0),
     )
     print(f"saved 8 plots: {args.output_dir}")
 
@@ -64,6 +72,27 @@ def load_plot_data(path: Path, label: str) -> TrajectoryPlotData:
         smoothing_poly_order=2,
     )
     return TrajectoryPlotData(label, trajectory, velocity.velocities_camera)
+
+
+def trim_to_estimate(
+    ground_truth: TrajectoryPlotData,
+    estimate: TrajectoryPlotData,
+) -> TrajectoryPlotData:
+    mask = (
+        (ground_truth.timestamps >= estimate.timestamps[0])
+        & (ground_truth.timestamps <= estimate.timestamps[-1])
+    )
+    indices = np.flatnonzero(mask)
+    if len(indices) == 0:
+        raise ValueError("Estimate and ground truth time ranges do not overlap")
+    trajectory = Trajectory(
+        [ground_truth.trajectory.samples[index] for index in indices]
+    )
+    return TrajectoryPlotData(
+        ground_truth.label,
+        trajectory,
+        ground_truth.velocities_camera[indices],
+    )
 
 
 def parse_args() -> argparse.Namespace:

@@ -16,6 +16,8 @@ if SRC_PATH.exists():
     sys.path.insert(0, str(SRC_PATH))
 
 from event_slam.io.result_io import load_evslam_result_array
+from event_slam.core.trajectory import Trajectory
+from trajectory_metrics import compute_pose_metrics, match_timestamps
 
 
 @dataclass
@@ -34,6 +36,12 @@ class EvSlamMetrics:
     mean_rve: float
     median_rve: float
     max_rve: float
+    rve_sample_count: int
+    rotation_rmse_deg: float
+    rpe_pair_count: int
+    rpe_delta_median_s: float
+    rpe_translation_rmse: float
+    rpe_rotation_rmse_deg: float
 
 
 def main() -> None:
@@ -42,11 +50,15 @@ def main() -> None:
     estimate = load_evslam_result_array(args.estimate)
     ground_truth = load_evslam_result_array(args.gt)
 
-    check_compatible_timestamps(
-        estimate=estimate,
-        ground_truth=ground_truth,
-        tolerance=args.timestamp_tolerance,
+    estimate_count = len(estimate)
+    gt_count = len(ground_truth)
+    estimate_indices, gt_indices = match_timestamps(
+        estimate[:, 0],
+        ground_truth[:, 0],
+        args.timestamp_tolerance,
     )
+    estimate = estimate[estimate_indices]
+    ground_truth = ground_truth[gt_indices]
 
     metrics = compute_metrics(
         estimate=estimate,
@@ -55,6 +67,7 @@ def main() -> None:
         xi_max=args.xi_max,
         xi_count=args.xi_count,
         min_speed=args.min_speed,
+        rpe_delta_seconds=args.rpe_delta_seconds,
     )
 
     write_metrics(
@@ -65,6 +78,9 @@ def main() -> None:
         xi_min=args.xi_min,
         xi_max=args.xi_max,
         xi_count=args.xi_count,
+        rpe_delta_seconds=args.rpe_delta_seconds,
+        estimate_count=estimate_count,
+        gt_count=gt_count,
     )
 
     print_metrics(metrics)
@@ -88,34 +104,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--xi-count", default=1001, type=int)
     parser.add_argument("--min-speed", default=1e-6, type=float)
     parser.add_argument("--timestamp-tolerance", default=1e-6, type=float)
+    parser.add_argument("--rpe-delta-seconds", default=1.0, type=float)
     return parser.parse_args()
-
-
-def check_compatible_timestamps(
-    estimate: np.ndarray,
-    ground_truth: np.ndarray,
-    tolerance: float,
-) -> None:
-    """
-    Check that estimated and GT trajectories have matching timestamps.
-    """
-    if estimate.shape[0] != ground_truth.shape[0]:
-        raise ValueError(
-            "Estimate and ground truth have different number of samples: "
-            f"{estimate.shape[0]} vs {ground_truth.shape[0]}"
-        )
-
-    timestamp_error = np.abs(estimate[:, 0] - ground_truth[:, 0])
-    max_error = float(np.max(timestamp_error))
-
-    if max_error > tolerance:
-        index = int(np.argmax(timestamp_error))
-        raise ValueError(
-            "Estimate and ground truth timestamps do not match. "
-            f"Max error={max_error:.9f} at index={index}, "
-            f"estimate={estimate[index, 0]:.9f}, "
-            f"gt={ground_truth[index, 0]:.9f}"
-        )
 
 
 def compute_metrics(
@@ -125,13 +115,15 @@ def compute_metrics(
     xi_max: float,
     xi_count: int,
     min_speed: float,
+    rpe_delta_seconds: float,
 ) -> EvSlamMetrics:
     """
     Compute ATE and speed-weighted RVE AUC.
     """
-    position_error = np.linalg.norm(
-        estimate[:, 1:4] - ground_truth[:, 1:4],
-        axis=1,
+    pose_metrics = compute_pose_metrics(
+        Trajectory.from_tum_array(estimate[:, :8]),
+        Trajectory.from_tum_array(ground_truth[:, :8]),
+        rpe_delta_seconds,
     )
 
     velocity_error = np.linalg.norm(
@@ -141,6 +133,9 @@ def compute_metrics(
 
     gt_speed = np.linalg.norm(ground_truth[:, 8:11], axis=1)
     rve = velocity_error / np.maximum(gt_speed, float(min_speed))
+    moving_rve = rve[gt_speed > float(min_speed)]
+    if len(moving_rve) == 0:
+        raise ValueError("Cannot compute RVE because all GT speeds are near zero")
 
     thresholds = np.linspace(float(xi_min), float(xi_max), int(xi_count))
     success = compute_weighted_success_curve(
@@ -159,15 +154,21 @@ def compute_metrics(
 
     return EvSlamMetrics(
         sample_count=int(estimate.shape[0]),
-        ate=float(np.mean(position_error)),
-        ate_rmse=float(np.sqrt(np.mean(position_error ** 2))),
-        ate_median=float(np.median(position_error)),
-        ate_max=float(np.max(position_error)),
+        ate=pose_metrics.position_mean,
+        ate_rmse=pose_metrics.position_rmse,
+        ate_median=pose_metrics.position_median,
+        ate_max=pose_metrics.position_max,
         auc=auc,
         auc_normalized=float(auc_normalized),
-        mean_rve=float(np.mean(rve)),
-        median_rve=float(np.median(rve)),
-        max_rve=float(np.max(rve)),
+        mean_rve=float(np.mean(moving_rve)),
+        median_rve=float(np.median(moving_rve)),
+        max_rve=float(np.max(moving_rve)),
+        rve_sample_count=len(moving_rve),
+        rotation_rmse_deg=pose_metrics.rotation_rmse_deg,
+        rpe_pair_count=pose_metrics.rpe_pair_count,
+        rpe_delta_median_s=pose_metrics.rpe_delta_median_s,
+        rpe_translation_rmse=pose_metrics.rpe_translation_rmse,
+        rpe_rotation_rmse_deg=pose_metrics.rpe_rotation_rmse_deg,
     )
 
 
@@ -201,6 +202,9 @@ def write_metrics(
     xi_min: float,
     xi_max: float,
     xi_count: int,
+    rpe_delta_seconds: float,
+    estimate_count: int,
+    gt_count: int,
 ) -> None:
     """
     Save metrics to a text file.
@@ -213,7 +217,11 @@ def write_metrics(
         file.write("=" * 80 + "\n")
         file.write(f"estimate: {estimate_path}\n")
         file.write(f"ground_truth: {ground_truth_path}\n")
-        file.write(f"sample_count: {metrics.sample_count}\n")
+        file.write(f"estimate_sample_count: {estimate_count}\n")
+        file.write(f"gt_sample_count: {gt_count}\n")
+        file.write(f"matched_sample_count: {metrics.sample_count}\n")
+        file.write(f"estimate_coverage: {metrics.sample_count / estimate_count:.9f}\n")
+        file.write(f"gt_coverage: {metrics.sample_count / gt_count:.9f}\n")
         file.write("\n")
 
         file.write("Position metrics\n")
@@ -222,6 +230,12 @@ def write_metrics(
         file.write(f"ATE_RMSE: {metrics.ate_rmse:.9f}\n")
         file.write(f"ATE_median: {metrics.ate_median:.9f}\n")
         file.write(f"ATE_max: {metrics.ate_max:.9f}\n")
+        file.write(f"rotation_RMSE_deg: {metrics.rotation_rmse_deg:.9f}\n")
+        file.write(f"RPE_delta_target_s: {rpe_delta_seconds:.9f}\n")
+        file.write(f"RPE_delta_median_s: {metrics.rpe_delta_median_s:.9f}\n")
+        file.write(f"RPE_pair_count: {metrics.rpe_pair_count}\n")
+        file.write(f"RPE_translation_RMSE_m: {metrics.rpe_translation_rmse:.9f}\n")
+        file.write(f"RPE_rotation_RMSE_deg: {metrics.rpe_rotation_rmse_deg:.9f}\n")
         file.write("\n")
 
         file.write("Velocity metrics\n")
@@ -229,6 +243,7 @@ def write_metrics(
         file.write(f"xi_min: {xi_min:.9f}\n")
         file.write(f"xi_max: {xi_max:.9f}\n")
         file.write(f"xi_count: {xi_count}\n")
+        file.write(f"RVE_sample_count: {metrics.rve_sample_count}\n")
         file.write(f"AUC: {metrics.auc:.9f}\n")
         file.write(f"AUC_normalized: {metrics.auc_normalized:.9f}\n")
         file.write(f"mean_RVE: {metrics.mean_rve:.9f}\n")
@@ -242,6 +257,8 @@ def print_metrics(metrics: EvSlamMetrics) -> None:
     print(f"sample_count: {metrics.sample_count}")
     print(f"ATE: {metrics.ate:.9f}")
     print(f"ATE_RMSE: {metrics.ate_rmse:.9f}")
+    print(f"RPE_translation_RMSE_m: {metrics.rpe_translation_rmse:.9f}")
+    print(f"RPE_rotation_RMSE_deg: {metrics.rpe_rotation_rmse_deg:.9f}")
     print(f"AUC: {metrics.auc:.9f}")
     print(f"AUC_normalized: {metrics.auc_normalized:.9f}")
     print(f"median_RVE: {metrics.median_rve:.9f}")
