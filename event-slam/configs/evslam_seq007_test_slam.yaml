@@ -19,6 +19,7 @@ imu:
     enabled: true
     max_error_deg: 3.0
     reject_bad_pnp: true
+    use_for_pose: true
 
 processing:
   time_window: 0.012
@@ -110,7 +111,7 @@ velocity:
   smoothing_poly_order: 2
 
 output:
-  output_dir: outputs/evslam_seq007_slam_final
+  output_dir: outputs/evslam_seq007_slam_imu_rot_fix
   trajectory_csv: trajectory.csv
   result_txt: result_seq007.txt
   keyframes_csv: keyframes.csv

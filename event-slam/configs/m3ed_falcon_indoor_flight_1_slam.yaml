@@ -16,6 +16,7 @@ imu:
     enabled: true
     max_error_deg: 3.0
     reject_bad_pnp: true
+    use_for_pose: true
 
 processing:
   time_window: 0.012
@@ -104,7 +105,7 @@ velocity:
   smoothing_poly_order: 2
 
 output:
-  output_dir: outputs/m3ed_falcon_indoor_flight_1_slam_loop_fix_try4
+  output_dir: outputs/m3ed_falcon_indoor_flight_1_imu_rot_fix
   trajectory_csv: trajectory.csv
   keyframes_csv: keyframes.csv
   landmarks_csv: landmarks.csv
