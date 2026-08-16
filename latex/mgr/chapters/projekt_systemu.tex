@@ -1,0 +1,23 @@
+\chapter{Projekt systemu}
+% Plan: Przedstawić wymagania, architekturę i przepływ danych zaprojektowanego systemu przed opisem szczegółów implementacyjnych. Źródła: aktualny kod pipeline.py, setup.py, konfiguracje i wymagania konkursów. Materiał: główny schemat blokowy systemu.
+\label{cha:projekt_systemu}
+
+\section{Założenia i wymagania}
+% Plan: Zdefiniować wejścia, wyjścia, tryb offline, obsługiwane sensory, skalę metryczną i oczekiwaną odporność, a także jawne elementy poza zakresem. Źródła: temat pracy, START_PROMPT.md zweryfikowany kodem i oficjalne wymagania konkursów. Materiał: tabela wymagań funkcjonalnych i ograniczeń.
+\label{sec:zalozenia_systemu}
+
+\section{Architektura i przepływ danych}
+% Plan: Pokazać wspólny pipeline dla EvSLAM i M3ED od readera do trajektorii, mapy i diagnostyki, wraz z miejscami użycia żyroskopu. Źródła: pipeline.py i setup.py. Materiał: schemat blokowy z rozdzieleniem front-endu, mapy i optymalizacji.
+\label{sec:architektura_systemu}
+
+\section{Reprezentacja stanu i mapy}
+% Plan: Określić przechowywaną pozę $T_W_C$, sposób wyznaczania prędkości, znaczenie klatki kluczowej, punktu mapy i obserwacji oraz strukturę grafu. Źródła: core/trajectory.py, core/velocity.py, slam/map.py i slam/pose_graph.py. Materiał: diagram struktur danych i ich relacji.
+\label{sec:stan_i_mapa}
+
+\section{Przebieg estymacji}
+% Plan: Opisać kolejność inicjalizacji, śledzenia względem mapy, fallbacku frame-to-frame, tworzenia klatek kluczowych, relokalizacji i korekty grafowej. Źródła: slam/stereo_pnp.py i slam/results.py. Materiał: diagram stanów pojedynczej iteracji z gałęziami niepowodzenia.
+\label{sec:przebieg_estymacji}
+
+\section{Decyzje projektowe i ograniczenia}
+% Plan: Uzasadnić wybór agregacji do obrazów, LK, stereo, PnP i lekkiego back-endu oraz omówić brak BA, pełnej preintegracji IMU, gęstej mapy i metod uczonych. Źródła: kod oraz porównanie z literaturą. Materiał: tabela decyzja--uzasadnienie--ograniczenie.
+\label{sec:decyzje_projektowe}

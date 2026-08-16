@@ -1,0 +1,23 @@
+\chapter{Wyniki}
+% Plan: Przedstawić wyniki tylko dla kompletnych, identyfikowalnych przebiegów i oddzielić obserwacje ilościowe od interpretacji oraz ograniczeń. Źródła: outputs z run_config.yaml, metrykami i logami. Materiał: tabele metryk, trajektorie, wykresy błędów i diagnostyka mapy.
+\label{cha:wyniki}
+
+\section{Weryfikacja etapów przetwarzania}
+% Plan: Pokazać jakościowo i liczbowo poprawność synchronizacji, rektyfikacji, kompensacji, śledzenia oraz stereo przed oceną całej trajektorii. Źródła: skrypty verification i odpowiadające im katalogi wyjściowe. Materiał: zestaw obrazów diagnostycznych i tabela odsetków zaakceptowanych obserwacji.
+\label{sec:wyniki_etapow}
+
+\section{Wyniki dla zbioru EvSLAM}
+% Plan: Podać rezultaty wybranych pełnych sekwencji z konfiguracją, zakresem, first_pose, ATE, RVE AUC i dodatkowymi RMSE lub RPE. Źródła: oficjalny protokół EvSLAM, evaluate_evslam_metrics.py i kompletne outputs. Materiał: tabela wyników, trajektorie i krzywa sukcesu RVE.
+\label{sec:wyniki_evslam}
+
+\section{Wyniki dla zbioru M3ED}
+% Plan: Podać APE i pomocnicze RPE po jawnie określonej synchronizacji i wyrównaniu, osobno dla wybranych sekwencji. Źródła: oficjalny protokół M3ED, evo, evaluate_m3ed_metrics.py i kompletne outputs. Materiał: tabela metryk, trajektorie 3D i błędy w czasie.
+\label{sec:wyniki_m3ed}
+
+\section{Porównanie konfiguracji i parametrów}
+% Plan: Porównać VO z SLAM-em oraz wpływ BAF, kompensacji, prioru rotacji i długości okna tylko na równych fragmentach danych. Źródła: pary przebiegów z tym samym zakresem i protokołem. Materiał: tabele ablacyjne i wykresy zależności metryki od parametru.
+\label{sec:wyniki_porownanie}
+
+\section{Analiza błędów i ograniczeń}
+% Plan: Omówić utratę śledzenia, błędy głębokości, dryf, fałszywe kandydatury pętli i nieudane relokalizacje na podstawie diagnostyki, bez przypisywania przyczyn bez dowodu. Źródła: logi, mapy, wykresy i kod odpowiedzialny za decyzje. Materiał: reprezentatywne przypadki awarii z osiami czasu.
+\label{sec:analiza_bledow}

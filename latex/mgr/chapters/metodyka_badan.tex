@@ -1,0 +1,23 @@
+\chapter{Metodyka badań}
+% Plan: Zdefiniować powtarzalny protokół eksperymentów, wybór danych, konfiguracji, wyrównania i metryk przed prezentacją wyników. Źródła: oficjalne materiały EvSLAM i M3ED, skrypty ewaluacji oraz zapisane run_config.yaml. Materiał: tabela kompletnego planu eksperymentów.
+\label{cha:metodyka_badan}
+
+\section{Zbiory danych i sekwencje testowe}
+% Plan: Opisać sensory, formaty, ground truth i wybrane sekwencje EvSLAM oraz M3ED, uzasadniając ich dobór i zakres czasowy. Źródła: oficjalne strony i dokumentacje zbiorów, readery oraz konfiguracje. Materiał: tabela sekwencji z czasem, platformą i użytymi sensorami.
+\label{sec:zbiory_danych}
+
+\section{Konfiguracje porównawcze}
+% Plan: Zdefiniować bazowe VO i pełny SLAM oraz warianty stereo, BAF, kompensacji ruchu i prioru rotacji; każdą próbę powiązać z konkretnym configiem. Źródła: configs i run_config.yaml wybranych wyników. Materiał: macierz eksperymentów sensor--moduł--parametry.
+\label{sec:konfiguracje_badan}
+
+\section{Metryki i wyrównanie trajektorii}
+% Plan: Zdefiniować ATE lub APE, RMSE, RPE i metrykę prędkości EvSLAM, wyraźnie rozdzielając first_pose od pomocniczych SE(3) i Sim(3). Źródła: oficjalne protokoły konkursów, evo i scripts/trajectory_metrics.py. Materiał: tabela metryk z jednostką, wyrównaniem i interwałem RPE.
+\label{sec:metryki}
+
+\section{Badanie wpływu parametrów}
+% Plan: Zaplanować kontrolowane porównania długości okna, stałej agregacji, filtracji, progów stereo i kryteriów klatek kluczowych, zmieniając jedną grupę parametrów naraz. Źródła: konfiguracje, kod modułów i literatura reprezentacji zdarzeń. Materiał: tabela zakresów parametrów oraz wykresy dokładność--stabilność--czas.
+\label{sec:badanie_parametrow}
+
+\section{Powtarzalność i pomiar czasu}
+% Plan: Opisać środowisko, komendę uruchomienia, wersję kodu, kompletność przebiegu i pomiar czasu offline; nie wnioskować o pracy w czasie rzeczywistym bez osobnego testu. Źródła: run_event_slam.py, ScriptsUsage.md i logi wybranych wyników. Materiał: tabela środowiska oraz czasu readera i pipeline'u.
+\label{sec:powtarzalnosc}

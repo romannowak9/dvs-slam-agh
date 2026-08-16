@@ -1,0 +1,43 @@
+\chapter{Implementacja systemu}
+% Plan: Opisać realizację modułów w Pythonie zgodnie z aktualnym kodem, z naciskiem na interfejsy, walidację danych i mechanizmy odporności. Źródła: src/event_slam i używany runner. Materiał: wybrane diagramy sekwencji oraz przykłady danych po etapach.
+\label{cha:implementacja}
+
+\section{Odczyt, kalibracja i synchronizacja danych}
+% Plan: Porównać reader ROS bag dla EvSLAM i strumieniowy reader H5 dla M3ED, omówić wspólne okna stereo i wczytywanie kalibracji. Źródła: datasets, calibration, event_window.py oraz run_event_slam.py. Materiał: tabela formatów wejścia i schemat synchronizacji osi czasu.
+\label{sec:implementacja_wejscie}
+
+\section{Przetwarzanie zdarzeń}
+% Plan: Opisać BAF, kompensację obrotową z żyroskopu, agregację do obrazów aktywności i rektyfikację, z parametrami odsyłającymi do konkretnych YAML. Źródła: events, stereo_rectifier.py i zapisane run_config.yaml. Materiał: obrazy przed i po każdym etapie.
+\label{sec:implementacja_zdarzenia}
+
+\subsection{Okna i filtr aktywności tła}
+% Plan: Wyjaśnić budowę zsynchronizowanych okien i kryterium sąsiedztwa BAF oraz zachowanie na pustych lub brzegowych fragmentach. Źródła: event_window.py i event_filter.py. Materiał: oś czasu okien stereo i porównanie liczby zdarzeń.
+\label{subsec:okna_baf}
+
+\subsection{Kompensacja ruchu i agregacja}
+% Plan: Opisać dyskretyzację czasu, obrót promieni do chwili referencyjnej i tryby tworzenia obrazu zdarzeniowego. Źródła: imu_motion_compensation.py i event_aggregator.py. Materiał: zestawienie obrazu bez i z kompensacją dla tego samego okna.
+\label{subsec:kompensacja_agregacja}
+
+\section{Śledzenie i głębokość stereo}
+% Plan: Przedstawić trwałe ID śladów, uzupełnianie puli cech, stereo LK, kontrole epipolarne, lewo--prawo, dysparycji i głębokości. Źródła: feature_tracker.py i stereo_depth.py. Materiał: wizualizacja śladów oraz histogram zaakceptowanych głębokości.
+\label{sec:implementacja_frontend}
+
+\section{Estymacja pozy kamery}
+% Plan: Opisać PnP względem lokalnej mapy, fallback frame-to-frame, użycie prioru rotacji i wszystkie kryteria odrzucenia kroku. Źródła: vo/pnp.py, slam/local_matching.py i slam/stereo_pnp.py. Materiał: schemat źródeł korespondencji i tabela progów z wybranego run_config.yaml.
+\label{sec:implementacja_pozy}
+
+\section{Mapa i mechanizmy SLAM}
+% Plan: Wyjaśnić tworzenie klatek kluczowych i punktów mapy, odzyskiwanie skojarzeń ORB, rozpoznawanie miejsca, relokalizację oraz dodawanie zweryfikowanych pętli do grafu. Źródła: slam/map.py, local_matching.py, place_recognition.py, pose_graph.py i stereo_pnp.py. Materiał: mapa 3D, graf pozy i przykładowa weryfikacja kandydata pętli.
+\label{sec:implementacja_slam}
+
+\subsection{Klatki kluczowe i punkty mapy}
+% Plan: Podać warunki tworzenia klatki kluczowej, wiązanie śladów z punktami mapy, lokalny zakres mapy i odrzucanie błędnych lub dalekich punktów. Źródła: map.py i odpowiednie fragmenty stereo_pnp.py. Materiał: diagram cyklu życia punktu mapy i wykres liczby aktywnych obserwacji.
+\label{subsec:klatki_landmarki}
+
+\subsection{Relokalizacja i domykanie pętli}
+% Plan: Rozdzielić ranking kandydatów od geometrycznej weryfikacji PnP, a następnie opisać warunki relokalizacji, krawędź pętli i korektę grafową. Źródła: place_recognition.py, pose_graph.py i stereo_pnp.py. Materiał: sekwencja kandydat--weryfikacja--korekta oraz diagnostyka liczby inlierów.
+\label{subsec:relocalizacja_petle}
+
+\section{Wyjścia, konfiguracja i diagnostyka}
+% Plan: Opisać runner, strukturę YAML, formaty trajektorii, mapy i prędkości oraz narzędzia diagnostyczne, bez przepisywania pełnych konfiguracji. Źródła: setup.py, io/result_io.py, scripts i configs. Materiał: tabela artefaktów wyjściowych i ich zastosowania.
+\label{sec:implementacja_wyjscia}

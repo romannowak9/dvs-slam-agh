@@ -1,0 +1,63 @@
+\chapter{Podstawy teoretyczne}
+% Plan: Wprowadzić pojęcia i modele matematyczne potrzebne do opisu systemu, od generacji zdarzeń po estymację trajektorii i jej ocenę. Źródła: oryginalne publikacje metod, podręczniki geometrii wielowidokowej i Cadena. Materiał: zestaw schematów geometrycznych i tabela symboli.
+\label{cha:podstawy_teoretyczne}
+
+\section{Kamery zdarzeniowe}
+% Plan: Przedstawić zasadę działania piksela zdarzeniowego, format zdarzenia, zalety i ograniczenia sensora w kontekście ruchu robota. Źródła: zweryfikowany survey i publikacje producentów lub autorów sensorów. Materiał: wykres zmiany logarytmu jasności i odpowiadających zdarzeń.
+\label{sec:kamery_zdarzeniowe}
+
+\subsection{Model generowania zdarzeń}
+% Plan: Zdefiniować krotkę zdarzenia, próg kontrastu, polaryzację i asynchroniczny czas pomiaru wraz z równaniem modelu. Źródła: oryginalny model sensora i survey. Materiał: rysunek działania pojedynczego piksela.
+\label{subsec:model_zdarzen}
+
+\subsection{Reprezentacje i filtracja zdarzeń}
+% Plan: Omówić okna czasowe, obrazy aktywności, powierzchnie czasu i filtrację aktywności tła, bez sugerowania jednej uniwersalnej reprezentacji. Źródła: publikacje o reprezentacjach i BAF oraz aktualny event_aggregator.py i event_filter.py. Materiał: porównanie kilku reprezentacji na tym samym oknie.
+\label{subsec:reprezentacje_zdarzen}
+
+\section{Estymacja stanu i ruchu kamery}
+% Plan: Zdefiniować stan rozpatrywany w pracy, pozę, trajektorię i prędkość oraz rozróżnić pomiar, estymatę i ground truth. Źródła: Cadena, literatura estymacji stanu i core/trajectory.py. Materiał: tabela symboli i układów współrzędnych.
+\label{sec:estymacja_stanu}
+
+\subsection{Poza i konwencje układów współrzędnych}
+% Plan: Wprowadzić SE(3), macierze jednorodne i konwencję $T_A_B$, w szczególności zapisywaną pozę $T_W_C$. Źródła: podręcznik robotyki lub geometrii oraz core/geometry.py. Materiał: schemat przejść między układami kamery, IMU i świata.
+\label{subsec:poza_i_uklady}
+
+\subsection{Odometria wizualna i SLAM}
+% Plan: Wyjaśnić różnicę między VO i SLAM-em, rolę mapy, klatek kluczowych, punktów mapy, relokalizacji i domykania pętli. Źródła: Cadena, PTAM, S-PTAM, ORB-SLAM i ORB-SLAM2. Materiał: schemat narastania błędu VO i korekty po domknięciu pętli.
+\label{subsec:vo_i_slam}
+
+\section{Geometria układu stereo}
+% Plan: Zebrać model kamery i zależności potrzebne do rektyfikacji, sprawdzania geometrii epipolarnej i triangulacji w skali metrycznej. Źródła: podręcznik geometrii wielowidokowej oraz dokumentacja kalibracji. Materiał: schemat z bazą stereo, dysparycją i głębokością.
+\label{sec:geometria_stereo}
+
+\subsection{Kalibracja i rektyfikacja}
+% Plan: Opisać parametry wewnętrzne i zewnętrzne, dystorsję oraz sprowadzenie linii epipolarnych do wspólnych wierszy. Źródła: literatura kalibracji i stereo_rectifier.py. Materiał: para obrazów przed i po rektyfikacji z liniami epipolarnymi.
+\label{subsec:kalibracja_rektyfikacja}
+
+\subsection{Dysparycja i triangulacja}
+% Plan: Wyprowadzić związek głębokości z ogniskową, bazą i dysparycją, a następnie omówić wpływ małej dysparycji oraz błędnych korespondencji. Źródła: geometria wielowidokowa i stereo_depth.py. Materiał: schemat triangulacji i wykres niepewności głębokości.
+\label{subsec:dysparycja_triangulacja}
+
+\section{Śledzenie cech i estymacja pozy}
+% Plan: Przedstawić front-end cechowy: detekcję narożników, przepływ optyczny LK, deskryptory ORB, PnP i odporne odrzucanie obserwacji odstających. Źródła: oryginalne publikacje FAST, GFTT, LK, ORB, PnP i RANSAC. Materiał: schemat korespondencji 2D--2D, stereo i 3D--2D.
+\label{sec:cechy_i_pnp}
+
+\subsection{Detekcja, opis i śledzenie cech}
+% Plan: Wyjaśnić role FAST lub GFTT, LK oraz ORB i wskazać różnicę między ciągłym śladem cechy a dopasowaniem deskryptorów. Źródła: publikacje metod i feature_tracker.py. Materiał: sekwencja dwóch obrazów z wektorami śledzenia.
+\label{subsec:sledzenie_cech}
+
+\subsection{Estymacja pozy metodą PnP}
+% Plan: Opisać problem 3D--2D, PnP z RANSAC, kryteria jakości oraz wykorzystanie znanej lub zadanej rotacji. Źródła: publikacje PnP, Kneipa i Troianiego oraz vo/pnp.py. Materiał: rysunek geometrii reprojekcji i tabela kryteriów akceptacji.
+\label{subsec:pnp}
+
+\section{Informacja inercyjna i graf pozy}
+% Plan: Dać podstawy dwóch pomocniczych mechanizmów systemu: integracji prędkości kątowej i optymalizacji grafu w SE(3), bez przedstawiania rozwiązania jako pełnego VIO. Źródła: literatura IMU, Grisetti i kod modułów imu oraz pose_graph.py. Materiał: dwa niewielkie schematy przepływu informacji.
+\label{sec:imu_i_graf}
+
+\subsection{Żyroskop w systemie wizyjnym}
+% Plan: Wyjaśnić całkowanie prędkości kątowej, transformację pomiaru do układu kamery, kompensację ruchu i prior rotacji oraz ograniczenia bez biasów i akcelerometru. Źródła: literatura VIO, Kneipa, Troiani i core/imu.py. Materiał: schemat obrotowego przekształcenia zdarzeń do czasu referencyjnego.
+\label{subsec:zyroskop}
+
+\subsection{Graf pozy i domykanie pętli}
+% Plan: Zdefiniować węzły, krawędzie odometryczne i pętli, błąd na SE(3) oraz odporną optymalizację. Źródła: Grisetti oraz pose_graph.py. Materiał: przykładowy graf przed i po dodaniu zweryfikowanej pętli.
+\label{subsec:graf_pozy}
