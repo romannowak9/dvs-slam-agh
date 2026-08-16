@@ -108,6 +108,9 @@ def create_pipeline(config: dict) -> EvSlamPipeline:
         imu_rotation_prior_reject_bad_pnp=bool(
             rotation_prior_cfg.get("reject_bad_pnp", False)
         ),
+        imu_rotation_prior_use_for_pose=bool(
+            rotation_prior_cfg.get("use_for_pose", False)
+        ),
         slam_params=slam_cfg,
     )
 

@@ -60,6 +60,7 @@ class StereoPnPSLAM:
         R_output_from_pnp_camera=None,
         imu_rotation_prior_max_error_deg: float = 3.0,
         imu_rotation_prior_reject_bad_pnp: bool = False,
+        imu_rotation_prior_use_for_pose: bool = False,
         slam_params=None,
     ) -> None:
         self.K = as_float_array(K, (3, 3), "K")
@@ -106,6 +107,7 @@ class StereoPnPSLAM:
             flags=pnp_flags,
             imu_max_error_deg=imu_rotation_prior_max_error_deg,
             reject_imu_inconsistent=imu_rotation_prior_reject_bad_pnp,
+            use_imu_rotation=imu_rotation_prior_use_for_pose,
         )
 
         slam_params = slam_params or {}
@@ -197,6 +199,7 @@ class StereoPnPSLAM:
         self.last_graph_cost_before = np.nan
         self.last_graph_cost_after = np.nan
         self.last_loop_keyframe_id = -self.loop_min_interval
+        self.pending_relocalization_loop = None
 
     def get_summary(self) -> StereoPnPSLAMSummary:
         inliers = [
@@ -300,7 +303,27 @@ class StereoPnPSLAM:
             return
 
         frame_index = len(self.results)
-        if not self._should_create_keyframe(frame_index, tracking_result.active_ids):
+        relocalization_loop = False
+        if (
+            result.relocalized
+            and self.loop_enabled
+            and self.pending_relocalization_loop is not None
+        ):
+            verification, _ = self.pending_relocalization_loop
+            next_keyframe_id = len(self.map.keyframes)
+            relocalization_loop = (
+                next_keyframe_id - verification.candidate.keyframe_id
+                >= self.loop_min_keyframe_gap
+                and next_keyframe_id
+                >= self.last_loop_keyframe_id + self.loop_min_interval
+            )
+        if (
+            not relocalization_loop
+            and not self._should_create_keyframe(
+                frame_index,
+                tracking_result.active_ids,
+            )
+        ):
             return
 
         place = self.place_recognizer.observe(
@@ -338,13 +361,21 @@ class StereoPnPSLAM:
         result.T_C_ref_C_frame = np.eye(4, dtype=np.float64)
 
         if previous_keyframe is not None:
+            sequential_pose = keyframe.T_W_C
+            if relocalization_loop:
+                # Relocalization changes the global pose, not the odometry edge.
+                _, sequential_pose = self.pending_relocalization_loop
             self.pose_graph.add_edge(
                 previous_keyframe.id,
                 keyframe.id,
-                invert_transform(previous_keyframe.T_W_C) @ keyframe.T_W_C,
+                invert_transform(previous_keyframe.T_W_C) @ sequential_pose,
                 "sequential",
             )
-        if self.loop_enabled:
+        if relocalization_loop:
+            verification, _ = self.pending_relocalization_loop
+            self.pending_relocalization_loop = None
+            self._finish_loop_closure(keyframe, result, verification)
+        elif self.loop_enabled:
             self._try_loop_closure(keyframe, result)
 
     def _set_frame_reference(self, result: StereoPnPSLAMResult) -> None:
@@ -384,9 +415,12 @@ class StereoPnPSLAM:
         if recognition.verification is None:
             return
 
-        verification = recognition.verification
+        self._finish_loop_closure(keyframe, result, recognition.verification)
+
+    def _finish_loop_closure(self, keyframe, result, verification) -> None:
         solution = verification.solution
         candidate_id = verification.candidate.keyframe_id
+        result.loop_candidate_count = max(1, result.loop_candidate_count)
         result.loop_candidate_id = candidate_id
         result.loop_match_count = verification.descriptor_match_count
         result.loop_pnp_point_count = len(solution.inlier_mask)
@@ -484,6 +518,7 @@ class StereoPnPSLAM:
         tracking_result,
         imu_rotation_prior: np.ndarray = None,
     ) -> StereoPnPSLAMResult:
+        self.pending_relocalization_loop = None
         map_correspondences = MapCorrespondences()
         if self.map is not None:
             map_correspondences = self.local_matcher.match(
@@ -498,6 +533,18 @@ class StereoPnPSLAM:
             len(map_correspondences.object_points),
             "not enough map correspondences",
         )
+        fixed_frame_rotation = None
+        fixed_world_rotation = None
+        if self.pnp.use_imu_rotation and imu_rotation_prior is not None:
+            R_Crect_C = self.T_Crect_C[:3, :3]
+            fixed_frame_rotation = (
+                R_Crect_C @ imu_rotation_prior @ self.R_C_Crect
+            )
+            fixed_world_rotation = (
+                R_Crect_C
+                @ imu_rotation_prior
+                @ self.T_W_Cleft[:3, :3].T
+            )
         if len(map_correspondences.object_points) >= self.pnp.min_points:
             map_solution = self.pnp.solve(
                 object_points=map_correspondences.object_points,
@@ -507,6 +554,7 @@ class StereoPnPSLAM:
                 refinement_T_Crect_object=(
                     self.T_Crect_C @ invert_transform(self.T_W_Cleft)
                 ),
+                fixed_rotation_Crect_object=fixed_world_rotation,
             )
 
         if map_solution.success:
@@ -527,6 +575,7 @@ class StereoPnPSLAM:
                     image_points=pnp_image_points,
                     imu_rotation_prior=imu_rotation_prior,
                     motion_converter=self._rectified_motion_to_output_motion,
+                    fixed_rotation_Crect_object=fixed_frame_rotation,
                 )
             pose_source = "vo_fallback" if solution.success else "none"
 
@@ -540,6 +589,7 @@ class StereoPnPSLAM:
             if relocalization is not None:
                 verification, place = relocalization
                 solution = verification.solution
+                odometry_pose = self.T_W_Cleft.copy()
                 current_indices = verification.candidate.current_indices
                 pnp_image_points = place.points_2d[current_indices].astype(
                     np.float64
@@ -553,6 +603,10 @@ class StereoPnPSLAM:
                 )
                 pose_source = "relocalization"
                 relocalized = True
+                self.pending_relocalization_loop = (
+                    verification,
+                    odometry_pose,
+                )
 
         if solution.success and not relocalized:
             self.T_W_Cleft = self.T_W_Cleft @ invert_transform(
@@ -593,18 +647,6 @@ class StereoPnPSLAM:
             right_rectified=right_rectified,
             active_points=tracking_result.active_points,
         )
-        if pose_source == "vo_fallback" and self.map is not None:
-            valid = np.isfinite(points_3d).all(axis=1)
-            valid[valid] = (
-                (points_3d[valid, 2] > 0.0)
-                & (points_3d[valid, 2] <= self.max_landmark_depth)
-            )
-            self.map.update_landmark_positions(
-                tracking_result.active_ids[valid],
-                self._rectified_points_to_output_camera(points_3d[valid]),
-                self.T_W_Cleft,
-            )
-
         self.prev_points_3d_rect = points_3d
         pnp_inlier_count = int(np.count_nonzero(solution.inlier_mask))
         self.consecutive_failures = (

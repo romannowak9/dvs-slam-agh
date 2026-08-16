@@ -128,26 +128,6 @@ class SparseMap:
                 + anchor.T_W_C[:3, 3]
             )
 
-    def update_landmark_positions(
-        self,
-        track_ids: np.ndarray,
-        points_C: np.ndarray,
-        T_W_C: np.ndarray,
-    ) -> None:
-        """Refresh visible landmarks after a successful VO fallback."""
-        positions_W = transform_points(T_W_C, points_C)
-        for track_id, position_W in zip(track_ids, positions_W):
-            landmark_id = self.track_to_landmark.get(int(track_id))
-            if landmark_id not in self.landmarks:
-                continue
-            landmark = self.landmarks[landmark_id]
-            landmark.position_W = position_W.copy()
-            anchor = self.keyframes[landmark.anchor_keyframe_id]
-            landmark.position_C_anchor = transform_points(
-                invert_transform(anchor.T_W_C),
-                position_W.reshape(1, 3),
-            )[0]
-
     def add_keyframe(
         self,
         frame_index: int,
