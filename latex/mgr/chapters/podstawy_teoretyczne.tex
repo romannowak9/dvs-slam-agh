@@ -1,63 +1,587 @@
 \chapter{Podstawy teoretyczne}
-% Plan: Wprowadzić pojęcia i modele matematyczne potrzebne do opisu systemu, od generacji zdarzeń po estymację trajektorii i jej ocenę. Źródła: oryginalne publikacje metod, podręczniki geometrii wielowidokowej i Cadena. Materiał: zestaw schematów geometrycznych i tabela symboli.
 \label{cha:podstawy_teoretyczne}
 
+W~rozdziale przedstawiono pojęcia potrzebne do opisu estymacji ruchu na podstawie danych zdarzeniowych. Wyjaśniono zasadę działania kamery zdarzeniowej, podstawowe reprezentacje jej danych, zapis pozy oraz różnice między VO, SLAM, i~VIO oraz przedstawiono sposoby wykorzystywania danych wizyjnych do estymacji ruchu.  Następnie omówiono geometrię stereo, estymację pozy i~grafową reprezentację trajektorii.
+
 \section{Kamery zdarzeniowe}
-% Plan: Przedstawić zasadę działania piksela zdarzeniowego, format zdarzenia, zalety i ograniczenia sensora w kontekście ruchu robota. Źródła: zweryfikowany survey i publikacje producentów lub autorów sensorów. Materiał: wykres zmiany logarytmu jasności i odpowiadających zdarzeń.
 \label{sec:kamery_zdarzeniowe}
 
+Kamera klatkowa rejestruje jednocześnie natężenie światła dla wszystkich pikseli, a~kolejne obrazy powstają w~chwilach narzuconych przez częstotliwość pracy czujnika. Kamera zdarzeniowa działa inaczej. Każdy jej piksel reaguje niezależnie na zmianę jasności, dlatego wyjściem nie jest sekwencja pełnych ramek obrazów, lecz asynchroniczny strumień danych nazywanych zdarzeniami. Różnicę między tymi sposobami rejestracji przedstawiono na rysunku~\ref{fig:event_camera_comparison}.
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=0.78\linewidth]{theory_frame_camera_vs_event_camera.png}
+    \caption{Porównanie wyjścia kamery klatkowej i~zdarzeniowej podczas obserwacji obracającej się tarczy. Źródło:~\cite{rebecq2018esim}.}
+    \label{fig:event_camera_comparison}
+\end{figure}
+
+Taki sposób pomiaru zapewnia małe opóźnienie i~dużą rozdzielczość czasową. Niezależna praca pikseli pozwala również uzyskać dużą rozpiętość tonalną i~może ograniczać rozmycie ruchu typowe dla skończonego czasu ekspozycji kamery klatkowej. Właściwości te są przydatne podczas szybkiego ruchu robota oraz przy dużych zmianach oświetlenia~\cite{gallego2022event}. Pojedyncze zdarzenie nie zawiera jednak bezwzględnej wartości jasności, a~liczba pomiarów zależy od kontrastu sceny i~ruchu. W~scenie statycznej strumień może być bardzo rzadki, natomiast zmiany oświetlenia i~szum czujnika mogą powodować zdarzenia niezwiązane z~ruchem obserwowanych krawędzi. Działanie systemu opartego wyłącznie o kamery zdarzeniowe, jest więc uzależnione od występowania na scenie wystarczającej liczby zmian jasności.
+
 \subsection{Model generowania zdarzeń}
-% Plan: Zdefiniować krotkę zdarzenia, próg kontrastu, polaryzację i asynchroniczny czas pomiaru wraz z równaniem modelu. Źródła: oryginalny model sensora i survey. Materiał: rysunek działania pojedynczego piksela.
 \label{subsec:model_zdarzen}
 
-\subsection{Reprezentacje i filtracja zdarzeń}
-% Plan: Omówić okna czasowe, obrazy aktywności, powierzchnie czasu i filtrację aktywności tła, bez sugerowania jednej uniwersalnej reprezentacji. Źródła: publikacje o reprezentacjach i BAF oraz aktualny event_aggregator.py i event_filter.py. Materiał: porównanie kilku reprezentacji na tym samym oknie.
+Niech $I(\mathbf{x},t)$ oznacza natężenie światła mierzone w~pikselu $\mathbf{x}=(x,y)^T$ w~chwili $t$. Logarytm jasności $L$ definiuje równanie
+\begin{equation}
+    L(\mathbf{x},t)=\log I(\mathbf{x},t).
+    \label{eq:log_intensity}
+\end{equation}
+Zdarzenie jest generowane, gdy zmiana $L$ względem wartości zapamiętanej podczas poprzedniego zdarzenia w~tym samym pikselu osiągnie próg kontrastu $C$~\cite{gallego2022event,rebecq2018esim}:
+\begin{equation}
+    L(\mathbf{x}_k,t_k)-L(\mathbf{x}_k,t_k-\Delta t_k)=p_k C.
+    \label{eq:event_generation}
+\end{equation}
+Indeks $k$ oznacza numer zdarzenia, $t_k$ jego znacznik czasu, $\Delta t_k$ czas od poprzedniego zdarzenia w~pikselu $\mathbf{x}_k$, a~$p_k\in\{-1,1\}$ polaryzację. Wartość dodatnia oznacza wzrost, a~ujemna spadek jasności. Pojedynczy pomiar ma postać
+\begin{equation}
+    e_k=(x_k,y_k,t_k,p_k),
+    \label{eq:event_tuple}
+\end{equation}
+gdzie $x_k$ i~$y_k$ są współrzędnymi piksela. Znacznik $t_k$ opisuje chwilę wystąpienia zmiany, a~nie czas wspólny dla całej matrycy. Zdarzenia pochodzące z~różnych pikseli nie tworzą więc naturalnych klatek.
+
+Równanie~\eqref{eq:event_generation} jest modelem idealnym. W~rzeczywistym czujniku dodatni i~ujemny próg mogą się różnić, a~ich wartości nie są identyczne dla wszystkich pikseli. Na pomiar wpływają również inne niedoskonałości (\cite{gallego2022event}):
+
+\begin{itemize}
+    \item \textbf{szum śrutowy} (ang. \textit{shot noise}) -- wynika z~losowego
+    charakteru liczby fotonów docierających do fotodiody. Powoduje fluktuacje
+    mierzonego sygnału, które mogą prowadzić do wygenerowania zdarzenia mimo
+    braku odpowiadającej mu zmiany jasności sceny;
+
+    \item \textbf{prądy upływu} (ang. \textit{leakage currents}) -- niewielkie
+    prądy pasożytnicze w~układzie piksela mogą powodować zmianę jego stanu
+    wewnętrznego nawet przy stałym oświetleniu. Prowadzi to do powstawania
+    fałszywych zdarzeń tła, określanych jako \textit{leak events};
+
+    \item \textbf{czas martwy piksela} (ang. \textit{refractory period}) --
+    po wygenerowaniu zdarzenia piksel przez krótki czas nie może wygenerować
+    kolejnego. Przy szybko zmieniającym się sygnale może to prowadzić do
+    pominięcia części zdarzeń;
+
+    \item \textbf{ograniczone pasmo fotoreceptora} -- układ piksela ma
+    skończoną szybkość odpowiedzi na zmianę natężenia światła. Szybkie zmiany
+    mogą być przez to tłumione lub rejestrowane z~opóźnieniem, szczególnie
+    przy niskim poziomie oświetlenia.
+\end{itemize}
+
+Wymienione efekty powodują zarówno powstawanie izolowanych zdarzeń tła,
+jak i~pomijanie lub opóźnianie zdarzeń odpowiadających rzeczywistym zmianom
+jasności.
+
+
+\subsection{Reprezentacje zdarzeń}
 \label{subsec:reprezentacje_zdarzen}
 
-\section{Estymacja stanu i ruchu kamery}
-% Plan: Zdefiniować stan rozpatrywany w pracy, pozę, trajektorię i prędkość oraz rozróżnić pomiar, estymatę i ground truth. Źródła: Cadena, literatura estymacji stanu i core/trajectory.py. Materiał: tabela symboli i układów współrzędnych.
+Surowy strumień zachowuje dokładne znaczniki czasu, ale nie ma regularnej struktury obrazu. Wiele metod grupuje zatem zdarzenia z~półotwartego okna $\mathcal{W}=[t_0,t_1)$ w~reprezentację o~stałym rozmiarze. Wybór długości okna jest kompromisem: dłuższe okno zawiera więcej aktywnych krawędzi, lecz zwiększa ich rozmycie podczas ruchu, a~krótsze może dostarczyć zbyt mało danych.
+
+Do często stosowanych reprezentacji zdarzeń w~postaci obrazowej należą:
+
+\begin{itemize}
+    \item \textbf{Klatka binarna} (ang. \textit{binary frame}) (Rys. \ref{fig:event_binary_frame}) -- piksel informuje jedynie o~tym, czy w~danym położeniu w~rozpatrywanym oknie czasowym wystąpiło zdarzenie. W~najprostszej postaci piksel przyjmuje wartość aktywną niezależnie od liczby zdarzeń i~ich polaryzacji~\cite{blachut2023eventframe}.
+
+    \begin{figure}[!ht]
+        \centering
+        \includegraphics[width=0.55\linewidth]{theory_event_binary_frame.png}
+        \caption{Przykład klatki binarnej utworzonej z~danych zdarzeniowych. Źródło: \cite{blachut2023eventframe}.}
+        \label{fig:event_binary_frame}
+    \end{figure}
+
+    \item \textbf{Klatka zdarzeniowa uwzględniająca polaryzację} (ang. \textit{event frame}) (Rys. \ref{fig:event_frame}), dla uproszczenia niżej nazywana standardową -- wartość piksela odpowiada polaryzacji zdarzenia zarejestrowanego w~danym położeniu:
+    \begin{equation}
+        F(\mathbf{x})=p_{\mathrm{last}}(\mathbf{x}),
+        \label{eq:standard_event_frame}
+    \end{equation}
+    gdzie $p_{\mathrm{last}}(\mathbf{x})\in\{-1,1\}$ oznacza polaryzację ostatniego zdarzenia w~pikselu $\mathbf{x}$. Piksel, w~którym nie wystąpiło żadne zdarzenie, otrzymuje wartość neutralną. Reprezentacja zachowuje informację o~polaryzacji, ale nie o~dokładnym czasie wystąpienia zdarzenia~\cite{blachut2023eventframe}.
+
+    \begin{figure}[!ht]
+        \centering
+        \includegraphics[width=0.55\linewidth]{theory_event_frame.png}
+        \caption{Przykład klatki zdarzeniowej uwzględniającej polaryzację. Źródło: \cite{blachut2023eventframe}.}
+        \label{fig:event_frame}
+    \end{figure}
+
+    \item \textbf{Wykładniczo zanikająca klatka zdarzeniowa} (ang. \textit{exponentially decaying time surface}) (Rys. \ref{fig:event_time_surface}) -- oprócz polaryzacji uwzględnia czas, jaki upłynął od ostatniego zdarzenia w~danym pikselu do chwili odniesienia. Wartość piksela można zapisać jako
+    \begin{equation}
+        F(\mathbf{x},t_r)=
+        p_{\mathrm{last}}(\mathbf{x})
+        \exp\left(
+        -\frac{t_r-t_{\mathrm{last}}(\mathbf{x})}{\tau}
+        \right),
+        \label{eq:exponential_event_frame}
+    \end{equation}
+    gdzie $t_{\mathrm{last}}(\mathbf{x})$ jest czasem ostatniego zdarzenia w~pikselu, a~$\tau>0$ określa szybkość zaniku. Dzięki temu nowsze zdarzenia mają większy wpływ na wynikowy obraz, natomiast znaczenie starszych stopniowo maleje~\cite{blachut2023eventframe}.
+
+    \begin{figure}[!ht]
+        \centering
+        \includegraphics[width=0.55\linewidth]{theory_event_exponential_frame.png}
+        \caption{Przykład wykładniczo zanikającej klatki zdarzeniowej. Źródło: \cite{blachut2023eventframe}.}
+        \label{fig:event_time_surface}
+    \end{figure}
+
+    \item \textbf{Siatka wokselowa} (ang. \textit{voxel grid}) -- oś czasu
+    okna dzieli się na $B$ przedziałów, tworząc tensor
+    $V\in\mathbb{R}^{B\times H\times W}$, gdzie $H$ i~$W$ oznaczają wysokość
+    i~szerokość obrazu. Czas każdego zdarzenia jest przeskalowywany do zakresu
+    odpowiadającego osi czasowej tensora:
+    \begin{equation}
+        \tilde{t}_k=(B-1)\frac{t_k-t_0}{t_1-t_0}.
+        \label{eq:voxel_time}
+    \end{equation}
+    Zdarzenie jest następnie przypisywane do najbliższych przedziałów czasowych,
+    a~jego wkład może być rozdzielony pomiędzy dwa sąsiednie przedziały za pomocą
+    interpolacji liniowej. Dzięki temu siatka wokselowa zachowuje więcej informacji
+    o~czasie występowania zdarzeń niż pojedyncza klatka, kosztem większego zużycia
+    pamięci i~konieczności przetwarzania danych wielokanałowych
+    ~\cite{zhu2019unsupervised}.
+\end{itemize}
+
+\section{Metody estymacji stanu}
 \label{sec:estymacja_stanu}
 
-\subsection{Poza i konwencje układów współrzędnych}
-% Plan: Wprowadzić SE(3), macierze jednorodne i konwencję $T_A_B$, w szczególności zapisywaną pozę $T_W_C$. Źródła: podręcznik robotyki lub geometrii oraz core/geometry.py. Materiał: schemat przejść między układami kamery, IMU i świata.
-\label{subsec:poza_i_uklady}
 
-\subsection{Odometria wizualna i SLAM}
-% Plan: Wyjaśnić różnicę między VO i SLAM-em, rolę mapy, klatek kluczowych, punktów mapy, relokalizacji i domykania pętli. Źródła: Cadena, PTAM, S-PTAM, ORB-SLAM i ORB-SLAM2. Materiał: schemat narastania błędu VO i korekty po domknięciu pętli.
-\label{subsec:vo_i_slam}
+\subsection{Odometria wizyjna, SLAM i VIO}
+\label{subsec:vo_slam_vio}
 
-\section{Geometria układu stereo}
-% Plan: Zebrać model kamery i zależności potrzebne do rektyfikacji, sprawdzania geometrii epipolarnej i triangulacji w skali metrycznej. Źródła: podręcznik geometrii wielowidokowej oraz dokumentacja kalibracji. Materiał: schemat z bazą stereo, dysparycją i głębokością.
-\label{sec:geometria_stereo}
+\textbf{Odometria wizyjna} (ang. \textit{Visual Odometry}, VO) jest problemem estymacji ruchu kamery na podstawie sekwencji obserwacji wizyjnych~\cite{nister2004visualodometry}. Wyznaczane są względne przemieszczenia pomiędzy kolejnymi lub bliskimi w~czasie położeniami kamery, a~następnie składane w~trajektorię. W~podstawowym ujęciu VO nie wymaga tworzenia trwałej mapy ani rozpoznawania powrotów do wcześniej odwiedzonych miejsc. System może wykorzystywać lokalnie utrzymywane punkty sceny, jednak służą one przede wszystkim do wyznaczania bieżącego ruchu. Ponieważ każde oszacowanie jest obarczone błędem, jego kolejne składanie prowadzi do narastającego dryfu położenia i~orientacji.
 
-\subsection{Kalibracja i rektyfikacja}
-% Plan: Opisać parametry wewnętrzne i zewnętrzne, dystorsję oraz sprowadzenie linii epipolarnych do wspólnych wierszy. Źródła: literatura kalibracji i stereo_rectifier.py. Materiał: para obrazów przed i po rektyfikacji z liniami epipolarnymi.
-\label{subsec:kalibracja_rektyfikacja}
+\textbf{SLAM} (ang. \textit{Simultaneous Localization and Mapping}) polega na jednoczesnej estymacji stanu robota oraz mapy nieznanego otoczenia na podstawie wykonywanych pomiarów~\cite{cadena2016slam}. Mapa nie musi być gęstym modelem całej sceny. Może zawierać na przykład wybrane punkty przestrzeni i~pozy, z~których zostały zaobserwowane. System określa położenie czujnika względem tej reprezentacji, a~jednocześnie uzupełnia ją na podstawie kolejnych obserwacji.
 
-\subsection{Dysparycja i triangulacja}
-% Plan: Wyprowadzić związek głębokości z ogniskową, bazą i dysparycją, a następnie omówić wpływ małej dysparycji oraz błędnych korespondencji. Źródła: geometria wielowidokowa i stereo_depth.py. Materiał: schemat triangulacji i wykres niepewności głębokości.
-\label{subsec:dysparycja_triangulacja}
+W~porównaniu z~VO system SLAM utrzymuje zależności pomiędzy pomiarami wykonanymi w~różnych chwilach. Ponowne obserwacje tych samych elementów otoczenia wprowadzają dodatkowe ograniczenia pomiędzy pozami i~pozwalają poprawiać spójność trajektorii oraz mapy. Estymacja nie opiera się więc wyłącznie na składaniu kolejnych przemieszczeń, chociaż bez ograniczeń obejmujących dłuższe fragmenty trasy również może podlegać narastającemu dryfowi.
 
-\section{Śledzenie cech i estymacja pozy}
-% Plan: Przedstawić front-end cechowy: detekcję narożników, przepływ optyczny LK, deskryptory ORB, PnP i odporne odrzucanie obserwacji odstających. Źródła: oryginalne publikacje FAST, GFTT, LK, ORB, PnP i RANSAC. Materiał: schemat korespondencji 2D--2D, stereo i 3D--2D.
-\label{sec:cechy_i_pnp}
+Jednym z~mechanizmów stosowanych w~systemach SLAM jest \textbf{domknięcie pętli} (ang. \textit{loop closure}), czyli wykrycie, że robot ponownie obserwuje wcześniej odwiedzony obszar. Pozwala ono powiązać odległe w~czasie fragmenty trajektorii i~skorygować część skumulowanego dryfu. Samo podobieństwo obserwacji nie jest wystarczające: przed wykorzystaniem takiego powiązania należy potwierdzić jego zgodność geometryczną.
 
-\subsection{Detekcja, opis i śledzenie cech}
-% Plan: Wyjaśnić role FAST lub GFTT, LK oraz ORB i wskazać różnicę między ciągłym śladem cechy a dopasowaniem deskryptorów. Źródła: publikacje metod i feature_tracker.py. Materiał: sekwencja dwóch obrazów z wektorami śledzenia.
+\textbf{Odometria wizyjno-inercyjna} (ang. \textit{Visual-Inertial Odometry}, VIO) łączy obserwacje wizyjne z~pomiarami czujnika IMU~\cite{forster2015preintegration}. Kamera dostarcza informacji o~ruchu względem obserwowanych elementów otoczenia, natomiast żyroskop i~akcelerometr mierzą odpowiednio prędkość kątową oraz przyspieszenie właściwe. Pomiary inercyjne są zwykle dostępne z~większą częstotliwością i~pozwalają opisywać ruch pomiędzy kolejnymi obserwacjami wizyjnymi. Ich całkowanie powoduje jednak narastanie błędów związanych między innymi z~szumem i~błędami systematycznymi czujników. Ograniczenia wynikające z~obserwacji kamer pozwalają zmniejszać ten dryf, dlatego w~pełnym systemie VIO wspólnie estymuje się zazwyczaj pozę, prędkość oraz błędy systematyczne IMU.
+
+VO i~VIO dotyczą przede wszystkim bieżącej estymacji ruchu, natomiast SLAM obejmuje również utrzymywanie mapy i~wykorzystywanie wcześniejszych obserwacji do poprawiania trajektorii. Pojęcia te nie są rozłączne: VIO określa sposób łączenia danych wizyjnych i~inercyjnych, który może być wykorzystywany zarówno w~odometrii, jak i~w~systemie SLAM.
+
+\subsection{Podejścia do estymacji i wykorzystywane dane}
+\label{subsec:podejscia_estymacja}
+
+\textbf{Wizyjny SLAM} (ang. \textit{visual SLAM}, vSLAM) jest odmianą SLAM, w~której podstawowym źródłem informacji o~otoczeniu są czujniki wizyjne. System może wykorzystywać pojedynczą kamerę, układ stereo albo kamerę uzupełnioną innymi czujnikami. Kamera monokularna nie dostarcza bezpośrednio metrycznej skali translacji, natomiast znana geometria układu stereo pozwala wyznaczać głębokość punktów~\cite{hartley2004multiple}. Pomiary inercyjne mogą dodatkowo dostarczać informacji o~ruchu pomiędzy kolejnymi obserwacjami obrazu~\cite{forster2015preintegration}.
+
+Chociaż tradycyjne algorytmy wizyjnego SLAM zaprojektowane zostały do przetwarzania klasycznych klatek obrazu, metody w nich wykorzystywane można z powodzeniem zastosować również do danych zdarzeniowych. Należy jednak pamiętać o ich odmiennej charakterystyce. Głębokie sieci neuronowe wymagają w tym celu dostosowania oraz dostrojenia wag. W celu zastosowania pozostałych metod, wykorzystywanych w tradycyjnym wizyjnym SLAM, można przekształcić strumień z kamery zdarzeniowej do reprezentacji obrazowej (~\ref{subsec:reprezentacje_zdarzen}), dzięki czemu otrzymujemy oparte na krawędziach obrazy w skali szarości, co w przybliżeniu odpowiada klatkom ze standardowej kamery.
+
+Stosowane podejścia można podzielić na:~\cite{huang2026eventbased}:
+\begin{itemize}
+    \item \textbf{metody bezpośrednie} -- wyznaczają ruch bez tworzenia jawnych korespondencji punktowych, wyrównując zdarzenia z~obrazem odniesienia albo porównując ich regularne reprezentacje;
+    \item \textbf{metody pośrednie, oparte na punktach charakterystycznych} -- wykrywają wybrane punkty, śledzą je lub dopasowują pomiędzy obserwacjami, a~następnie estymują ruch kamery i~strukturę sceny na podstawie jawnych korespondencji. Chociaż jest to metoda początkowo zaprojektowana jako sposób przetwarzania obrazów z tradycyjnej kamery, to zastosowanie reprezentacji danych zdarzeniowych jako klatki pozwala na użycie tej metody również dla czujników DVS. Powstały również algorytmy dedykowane do znajdowania punktów charakterystycznych w strumieniu danych z kamery zdarzeniowej \cite{vasco2016eharris}.
+    \item \textbf{metody oparte na kompensacji ruchu} -- przekształcają zdarzenia zgodnie z~rozpatrywanym modelem ruchu i~dobierają jego parametry tak, aby zdarzenia po wyrównaniu tworzyły możliwie spójną reprezentację;
+    \item \textbf{metody wykorzystujące uczenie głębokie} -- używają modeli przewidujących na podstawie zdarzeń, między innymi ruch kamery, przepływ optyczny lub głębokość sceny.
+\end{itemize}
+
+Dane zdarzeniowe można przetwarzać bezpośrednio jako asynchroniczny strumień, albo najpierw grupować je w~regularne reprezentacje obrazowe opisane w~podsekcji~\ref{subsec:reprezentacje_zdarzen}. Pierwsze podejście wykorzystuje położenia i~dokładne znaczniki czasu pojedynczych zdarzeń. Drugie umożliwia zastosowanie wybranych metod opracowanych dla obrazów, ponieważ wynik ma regularną siatkę pikseli. Wartości takiej reprezentacji opisują jednak aktywność zdarzeń~\cite{gallego2022event,huang2026eventbased}.
+
+Dalsza część rozdziału koncentruje się na podejściu pośrednim, wykorzystującym klatki utworzone ze zdarzeń. Na regularnej reprezentacji można stosować klasyczne detektory punktów, takie jak GFTT i~FAST, a~następnie śledzić punkty metodą Lucas--Kanade albo porównywać je za pomocą deskryptorów~\cite{shi1994good,rosten2006fast,lucas1981iterative}.~W pracy~\cite{rebecq2017eventvio} oraz~w~\cite{vidal2018ultimate}, wykorzystano wirtualne klatki zdarzeniowe wraz z~detektorem FAST i~śledzeniem Lucas--Kanade. Korespondencje punktów pomiędzy kamerami pozwalają wyznaczyć ich położenia 3D, które wraz z~bieżącymi obserwacjami 2D służą do estymacji pozy kamery.
+
+\section{Punkty charakterystyczne i ich śledzenie}
+\label{sec:punkty_charakterystyczne}
 \label{subsec:sledzenie_cech}
 
-\subsection{Estymacja pozy metodą PnP}
-% Plan: Opisać problem 3D--2D, PnP z RANSAC, kryteria jakości oraz wykorzystanie znanej lub zadanej rotacji. Źródła: publikacje PnP, Kneipa i Troianiego oraz vo/pnp.py. Materiał: rysunek geometrii reprojekcji i tabela kryteriów akceptacji.
+Metody, bazujące na charakterystycznych elementach obrazu, wybierają punkty o~lokalnym otoczeniu pozwalającym na ich ponowne odnalezienie, a~następnie tworzą korespondencje pomiędzy obserwacjami. Agregowanie strumienia zdarzeń do postaci ramek zdarzeniowych pozwala z zastosowanie w tego typu systemach algorytmów przeznaczonych do przetwarzania obrazu, co jest zaletą takiego podejścia.
+
+Z~obrazu wybierane są punkty charakterystyczne, których położenie można wiarygodnie wyznaczyć i~porównywać pomiędzy kolejnymi obserwacjami. \textbf{Detektor punktów charakterystycznych} wskazuje najczęściej narożniki lub inne obszary o~wyraźnej zmianie wartości obrazu w~więcej niż jednym kierunku. Punkty znajdujące się na obszarach jednorodnych lub prostych krawędziach są mniej użyteczne, ponieważ ich położenie jest trudniejsze do jednoznacznego określenia.
+
+\textbf{Detektor Shi--Tomasiego} -- GFTT (ang. \textit{Good Features to Track}) ocenia lokalne zmiany wartości obrazu na podstawie macierzy utworzonej z~gradientów. Punkt jest uznawany za odpowiedni do śledzenia, gdy obie wartości własne tej macierzy są dostatecznie duże; w~praktyce kryterium wykorzystuje mniejszą z~nich. Pozwala to odrzucić zarówno obszary jednorodne, jak i~punkty leżące na prostych krawędziach~\cite{shi1994good}.
+
+\textbf{Detektor FAST} (ang. \textit{Features from Accelerated Segment Test}) wykrywa narożniki na podstawie wartości pikseli leżących na okręgu wokół analizowanego punktu. Punkt zostaje uznany za narożnik, jeżeli odpowiednio długi ciąg sąsiednich pikseli okręgu jest wyraźnie jaśniejszy lub ciemniejszy od jego środka. Metoda została zaprojektowana z~myślą o~bardzo szybkim wykrywaniu punktów charakterystycznych~\cite{rosten2006fast}.
+
+Samo położenie punktu nie wystarcza jednak do jego ponownego rozpoznania po większej zmianie obrazu. W~tym celu stosuje się \textbf{deskryptory punktów charakterystycznych}, czyli reprezentacje numeryczne opisujące lokalne otoczenie punktu. Umożliwiają one porównywanie punktów wykrytych w~różnych obrazach i~wyznaczanie ich korespondencji.
+
+Przykładem często stosowanej metody jest \textbf{ORB} (ang. \textit{Oriented FAST and Rotated BRIEF}), która łączy detekcję punktów FAST z~binarnym deskryptorem opartym na BRIEF (ang. \textit{Binary Robust Independent Elementary Features}). Orientacja punktu jest uwzględniana podczas konstrukcji deskryptora, co zwiększa jego odporność na obrót obrazu~\cite{rublee2011orb}. Ponieważ deskryptor ma postać binarną, podobieństwo dwóch punktów może być szybko oceniane za pomocą odległości Hamminga. Uzyskane dopasowania mogą jednak zawierać błędne korespondencje i~zwykle wymagają późniejszej weryfikacji geometrycznej.
+
+Jeżeli punkt jest obserwowany w~kolejnych, blisko położonych w~czasie obrazach, zamiast ponownie wyszukiwać go na podstawie deskryptora można bezpośrednio \textbf{śledzić jego położenie}. Jako metoda śledzenia może być wykorzystany między innymi przepływ optyczny Lucas--Kanade~\cite{lucas1981iterative}. Metoda zakłada, że wartości obserwowanego fragmentu obrazu zmieniają się niewiele pomiędzy kolejnymi klatkami oraz że ruch w~niewielkim otoczeniu punktu jest w~przybliżeniu jednakowy. Na tej podstawie wyznaczane jest przesunięcie najlepiej dopasowujące lokalny fragment pierwszego obrazu do drugiego.
+
+Podstawowa metoda Lucas--Kanade dobrze radzi sobie z~niewielkimi przemieszczeniami. W~wariancie piramidalnym obrazy są analizowane na kilku poziomach rozdzielczości: duże przemieszczenie jest najpierw oszacowywane na obrazie o~mniejszej rozdzielczości, a~następnie kolejno doprecyzowywane na dokładniejszych poziomach piramidy. Pozwala to stosować metodę również przy większym ruchu pomiędzy kolejnymi obrazami. W~przypadku klatek zdarzeniowych śledzony jest lokalny wzorzec aktywności zdarzeń, a~nie jasność zarejestrowana przez kamerę klatkową~\cite{rebecq2017eventvio,vidal2018ultimate}.
+
+
+\section{Podstawy geometryczne estymacji ruchu}
+\label{sec:geometria_stereo}
+
+Estymacja ruchu wymaga jednoznacznego zapisu położenia i~orientacji kamery oraz modelu wiążącego punkty przestrzeni z~ich obserwacjami na obrazie. W~tej sekcji wprowadzono stosowaną konwencję transformacji, a~następnie przedstawiono geometrię skalibrowanego układu stereo.
+
+\subsection{Rotacja i translacja}
+\label{subsec:translacja_i_rotacja}
+
+\textbf{Położenie (translacja)} określa pozycję początku jednego układu współrzędnych względem drugiego i~jest opisywane wektorem $\mathbf{t}\in\mathbb{R}^3$. \textbf{Orientacja (rotacja)} opisuje wzajemne ustawienie osi tych układów i~może być reprezentowana przez macierz obrotu $\mathbf{R}\in SO(3)$. Grupa $SO(3)$ obejmuje obroty w~przestrzeni trójwymiarowej reprezentowane przez macierze ortogonalne o~wyznaczniku równym~1~\cite{blanco2021se3}. Połączenie położenia i~orientacji nazywane jest \textbf{pozą} (ang. \textit{pose}).
+
+Pozę jednego układu współrzędnych względem drugiego można reprezentować za pomocą jednorodnej macierzy transformacji $\mathbf{T}\in SE(3)$. Grupa $SE(3)$ obejmuje sztywne transformacje w~przestrzeni trójwymiarowej, złożone z~obrotu i~translacji, które zachowują kształt oraz rozmiar obiektów~\cite{blanco2021se3}. Macierz transformacji ma postać
+\begin{equation}
+    \mathbf{T}
+    =
+    \begin{bmatrix}
+        \mathbf{R} & \mathbf{t}\\
+        \mathbf{0}^{T} & 1
+    \end{bmatrix},
+    \label{eq:se3_transform}
+\end{equation}
+gdzie $\mathbf{R}$ opisuje rotację pomiędzy układami, $\mathbf{t}$ ich względne przesunięcie, a~symbol $\mathbf{0}^{T}$ oznacza trójelementowy wiersz zerowy.
+
+Zapis $\mathbf{T}_{A B}$ oznacza transformację współrzędnych z~układu $B$ do układu $A$. Dla punktu $\bar{\mathbf{X}}_B$ zapisanego we współrzędnych jednorodnych zachodzi
+\begin{equation}
+    \bar{\mathbf{X}}_A
+    =
+    \mathbf{T}_{A B}\bar{\mathbf{X}}_B.
+    \label{eq:frame_transform}
+\end{equation}
+Macierz $\mathbf{R}_{A B}$ i~wektor $\mathbf{t}_{A B}$ są odpowiednio częścią obrotową i~translacyjną transformacji $\mathbf{T}_{A B}$. Transformacje można składać zgodnie z~kolejnością układów, na przykład $\mathbf{T}_{A C}=\mathbf{T}_{A B}\mathbf{T}_{B C}$. Transformację w~przeciwnym kierunku otrzymuje się przez odwrócenie macierzy: $\mathbf{T}_{B A}=\mathbf{T}_{A B}^{-1}$.
+
+W~dalszej części pracy poza kamery ma postać $\mathbf{T}_{W C}$, a~więc przekształca punkt z~układu kamery $C$ do układu świata $W$. Uporządkowany w~czasie zbiór takich póz tworzy \textbf{trajektorię}.
+
+\subsection{Model kamery i kalibracja stereo}
+\label{subsec:model_kamery}
+
+Pojedyncza obserwacja punktu obrazu określa kierunek, w~którym znajduje się punkt sceny, lecz nie pozwala wyznaczyć jego odległości od kamery. Obserwacja tego samego punktu przez drugą kamerę dostarcza dodatkowego ograniczenia geometrycznego. Jeżeli względne położenie kamer jest znane z~kalibracji, położenie punktu w~przestrzeni może zostać wyznaczone przez triangulację, a~znana odległość pomiędzy kamerami pozwala określić jego głębokość w~skali metrycznej~\cite{fusiello2000rectification}.
+
+W~modelu kamery otworkowej (ang. \textit{pinhole camera}) punkt
+$\mathbf{X}_C=(X,Y,Z)^T$, zapisany w~układzie kamery, jest rzutowany
+na punkt obrazu $(u,v)^T$ zgodnie z~zależnością~\cite{fusiello2000rectification}
+\begin{equation}
+    s
+    \begin{bmatrix}
+        u \\
+        v \\
+        1
+    \end{bmatrix}
+    =
+    \mathbf{K}
+    \begin{bmatrix}
+        X \\
+        Y \\
+        Z
+    \end{bmatrix},
+    \qquad
+    \mathbf{K}
+    =
+    \begin{bmatrix}
+        f_x & 0   & c_x \\
+        0   & f_y & c_y \\
+        0   & 0   & 1
+    \end{bmatrix}.
+    \label{eq:pinhole_projection}
+\end{equation}
+gdzie $s$ jest współczynnikiem skali, $f_x$ i~$f_y$ oznaczają ogniskowe
+wyrażone w~pikselach, a~$(c_x,c_y)$ jest punktem głównym, czyli miejscem
+przecięcia osi optycznej z~płaszczyzną obrazu. Macierz $\mathbf{K}$
+zawiera więc \textbf{parametry wewnętrzne kamery}.
+
+Punkt obrazu można zapisać we \textbf{współrzędnych jednorodnych} jako
+$\bar{\mathbf{u}}=(u,v,1)^T$. W~takim zapisie wektory różniące się niezerowym współczynnikiem skali reprezentują ten sam punkt. Pozwala to zapisać rzutowanie punktu 3D z~dowolnego układu odniesienia w~postaci
+\begin{equation}
+\bar{\mathbf{u}}
+\sim
+\mathbf{P}\bar{\mathbf{X}},
+\qquad
+\mathbf{P}
+=
+\mathbf{K}
+\begin{bmatrix}
+\mathbf{R} & \mathbf{t}
+\end{bmatrix},
+\label{eq:camera_projection_matrix}
+\end{equation}
+gdzie $\bar{\mathbf{X}}=(X,Y,Z,1)^T$ jest jednorodnym zapisem punktu 3D, a~symbol $\sim$ oznacza równość z~dokładnością do niezerowego współczynnika skali. Macierz $\mathbf{P}\in\mathbb{R}^{3\times4}$ nazywana jest \textbf{macierzą projekcji} kamery. Łączy ona parametry wewnętrzne $\mathbf{K}$ z~rotacją $\mathbf{R}$ i~translacją $\mathbf{t}$ określającymi położenie kamery względem przyjętego układu odniesienia~\cite{fusiello2000rectification} i~pozwala na odwzorowanie punktu przestrzeni trójwymiarowej na odpowiadający mu punkt obrazu.
+
+Rzeczywista kamera odbiega od idealnego modelu otworkowego między innymi wskutek dystorsji obiektywu. Parametry modelu dystorsji są dlatego wyznaczane podczas kalibracji, a~w~dalszym opisie geometrii zakłada się punkty po jej korekcji.
+
+\textbf{Kalibracja stereo} obejmuje wyznaczenie parametrów wewnętrznych i~modeli dystorsji obu kamer oraz ich względnego położenia i~orientacji. Przyjmując lewą kamerę jako układ odniesienia, transformację z~układu lewej kamery $C_L$ do prawej $C_R$ można zapisać jako
+\begin{equation}
+\mathbf{T}_{C_R C_L}
+=
+\begin{bmatrix}
+\mathbf{R} & \mathbf{t}\\
+\mathbf{0}^T & 1
+\end{bmatrix},
+\label{eq:stereo_extrinsics}
+\end{equation}
+co oznacza, że współrzędne punktu w~obu układach spełniają
+\begin{equation}
+\mathbf{X}_R
+=
+\mathbf{R}\mathbf{X}_L+\mathbf{t}.
+\label{eq:stereo_relative_pose}
+\end{equation}
+Odległość pomiędzy środkami optycznymi kamer
+\begin{equation}
+B=\|\mathbf{t}\|
+\label{eq:stereo_baseline}
+\end{equation}
+nazywana jest \textbf{bazą układu stereo}.
+
+\textbf{Rektyfikacja stereo} przekształca obrazy obu kamer na podstawie ich kalibracji tak, aby odpowiadające sobie punkty znajdowały się w~tych samych wierszach (liniach epipolarnych). Można ją interpretować jako zastąpienie rzeczywistych kamer parą kamer wirtualnych o~równoległych płaszczyznach obrazowania i~osi poziomej zgodnej z~bazą stereo. Wyszukiwanie korespondencji zostaje dzięki temu ograniczone z~obszaru dwuwymiarowego do pojedynczego wiersza obrazu.~\cite{fusiello2000rectification}.
+
+\subsection{Geometria epipolarna}
+\label{subsec:geometria_epipolarna}
+
+Punkt obrazu wyznacza promień wychodzący ze środka optycznego kamery, na którym może znajdować się obserwowany punkt sceny. Rzut tego promienia na płaszczyznę obrazu drugiej kamery tworzy \textbf{linię epipolarną}. Odpowiadający punkt w~drugim obrazie nie może więc znajdować się w~dowolnym miejscu, lecz musi leżeć na tej linii~\cite{fusiello2000rectification}.
+
+Przyjmując układ lewej kamery jako układ odniesienia, macierze projekcji obu kamer mają postać
+\begin{equation}
+\mathbf{P}_L
+=
+\mathbf{K}_L
+\begin{bmatrix}
+\mathbf{I} & \mathbf{0}
+\end{bmatrix},
+\qquad
+\mathbf{P}_R
+=
+\mathbf{K}_R
+\begin{bmatrix}
+\mathbf{R} & \mathbf{t}
+\end{bmatrix},
+\label{eq:stereo_projection_matrices}
+\end{equation}
+gdzie $\mathbf{I}$ jest macierzą jednostkową, natomiast $\mathbf{R}$ i~$\mathbf{t}$ są parametrami względnej pozy kamer z~równania~\eqref{eq:stereo_relative_pose}.
+
+Wpływ parametrów wewnętrznych kamer można usunąć, przechodząc z~jednorodnych współrzędnych pikselowych $\bar{\mathbf{u}}_L$ i~$\bar{\mathbf{u}}_R$ do \textbf{znormalizowanych współrzędnych obrazu}
+\begin{equation}
+\mathbf{q}_L
+=
+\mathbf{K}_L^{-1}\bar{\mathbf{u}}_L,
+\qquad
+\mathbf{q}_R
+=
+\mathbf{K}_R^{-1}\bar{\mathbf{u}}_R.
+\label{eq:normalized_image_coordinates}
+\end{equation}
+
+Dla skalibrowanej pary kamer geometrię odpowiadających sobie punktów opisuje macierz $\mathbf{E}$ (ang. \textit{essential matrix})
+\begin{equation}
+    \mathbf{E}
+    =
+    [\mathbf{t}]_{\times}\mathbf{R},
+    \label{eq:essential_matrix}
+\end{equation}
+gdzie $[\mathbf{t}]_{\times}$ oznacza macierz operatora iloczynu
+wektorowego, zdefiniowaną jako
+\begin{equation}
+    [\mathbf{t}]_{\times}
+    =
+    \begin{bmatrix}
+        0    & -t_z & t_y \\
+        t_z  & 0    & -t_x \\
+        -t_y & t_x  & 0
+    \end{bmatrix}.
+    \label{eq:cross_product_matrix}
+\end{equation}
+Dla dowolnego wektora $\mathbf{a}\in\mathbb{R}^3$ zachodzi więc
+\begin{equation}
+    [\mathbf{t}]_{\times}\mathbf{a}
+    =
+    \mathbf{t}\times\mathbf{a}.
+    \label{eq:cross_product_operator}
+\end{equation}
+
+Odpowiadające sobie punkty w~obu obrazach spełniają wówczas \textbf{ograniczenie epipolarne}
+\begin{equation}
+\mathbf{q}_R^T
+\mathbf{E}
+\mathbf{q}_L
+=
+0.
+\label{eq:essential_constraint}
+\end{equation}
+Oznacza ono, że punkt odpowiadający obserwacji z~jednej kamery może znajdować się w~drugim obrazie jedynie na wyznaczonej przez geometrię kamer linii epipolarnej.
+
+Jeżeli punkty są zapisane bezpośrednio we współrzędnych pikselowych,
+tę samą zależność opisuje macierz $\mathbf{F}$
+(ang. \textit{fundamental matrix}),
+\begin{equation}
+    \mathbf{F}
+    =
+    \mathbf{K}_R^{-T}
+    \mathbf{E}
+    \mathbf{K}_L^{-1},
+    \label{eq:fundamental_matrix}
+\end{equation}
+dla której
+\begin{equation}
+    \bar{\mathbf{u}}_R^T
+    \mathbf{F}
+    \bar{\mathbf{u}}_L
+    =
+    0.
+    \label{eq:fundamental_constraint}
+\end{equation}
+
+Zależności te są zgodne z~modelem skalibrowanej pary kamer przedstawionym w~\cite{nister2004fivepoint}.
+
+Macierze $\mathbf{E}$ i~$\mathbf{F}$ opisują zatem to samo ograniczenie geometryczne, odpowiednio dla współrzędnych znormalizowanych i~pikselowych~\cite{nister2004fivepoint}.
+
+\subsection{Dysparycja i triangulacja}
+\label{subsec:dysparycja_triangulacja}
+
+\textbf{Triangulacja} polega na wyznaczeniu położenia punktu w~przestrzeni na podstawie jego projekcji w~co najmniej dwóch obrazach oraz znanej geometrii kamer. Dla pary stereo punkt $\bar{\mathbf{X}}$ powinien spełniać zależności
+\begin{equation}
+\bar{\mathbf{u}}_L
+\sim
+\mathbf{P}_L\bar{\mathbf{X}},
+\qquad
+\bar{\mathbf{u}}_R
+\sim
+\mathbf{P}_R\bar{\mathbf{X}},
+\label{eq:stereo_triangulation}
+\end{equation}
+gdzie $\mathbf{P}_L$ i~$\mathbf{P}_R$ są macierzami projekcji z~równania~\eqref{eq:stereo_projection_matrices}. W~obecności błędów pomiarowych promienie odpowiadające obu obserwacjom nie muszą przecinać się dokładnie, dlatego położenie punktu wyznacza się jako rozwiązanie najlepiej spełniające oba ograniczenia~\cite{kitani2017triangulation}.
+
+Dla zrektyfikowanego układu stereo triangulacja przyjmuje szczególnie prostą postać. \textbf{Dysparycja} $d$ jest różnicą poziomych współrzędnych odpowiadających sobie punktów:
+\begin{equation}
+d=u'_L-u'_R.
+\label{eq:disparity}
+\end{equation}
+Dla standardowego zrektyfikowanego układu, w~którym osie optyczne wirtualnych kamer są równoległe, a~baza $B$ jest skierowana wzdłuż osi poziomej, głębokość punktu $Z$ wynosi
+\begin{equation}
+Z=\frac{f'_x B}{d},
+\label{eq:stereo_depth}
+\end{equation}
+gdzie $f'_x$ jest ogniskową poziomą kamery po rektyfikacji, wyrażoną w~pikselach. Współrzędne punktu w~układzie lewej zrektyfikowanej kamery można następnie wyznaczyć jako
+\begin{equation}
+X=\frac{(u'_L-c'_x)Z}{f'_x},
+\qquad
+Y=\frac{(v'_L-c'_y)Z}{f'_y},
+\label{eq:stereo_point}
+\end{equation}
+gdzie $f'_x$, $f'_y$, $c'_x$ i~$c'_y$ są parametrami wewnętrznymi wirtualnej kamery po rektyfikacji. Nie muszą być one identyczne z~parametrami pierwotnej kamery z~równania~\eqref{eq:pinhole_projection}.
+
+Ideę triangulacji przedstawiono na rysunku~\ref{fig:triangulation}.
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=0.76\linewidth]{theory_stereo_triangulation_geometry.png}
+\caption{Idea triangulacji punktu na podstawie dwóch projekcji. W~obecności szumu promienie nie muszą przecinać się dokładnie, dlatego wybierane jest rozwiązanie najlepiej spełniające oba ograniczenia. Źródło:~\cite{kitani2017triangulation}.}
+\label{fig:triangulation}
+\end{figure}
+
+Wrażliwość wyznaczonej głębokości na błąd dysparycji wynika z~równania~\eqref{eq:stereo_depth}:
+\begin{equation}
+\left|
+\frac{\partial Z}{\partial d}
+\right|
+=
+\frac{f'_x B}{d^2}.
+\label{eq:depth_sensitivity}
+\end{equation}
+Ten sam błąd wyznaczenia dysparycji powoduje więc coraz większy błąd głębokości wraz ze wzrostem odległości punktu od kamer.
+
+
+\section{Estymacja pozy metodą PnP}
+\label{sec:estymacja_pnp}
 \label{subsec:pnp}
 
-\section{Informacja inercyjna i graf pozy}
-% Plan: Dać podstawy dwóch pomocniczych mechanizmów systemu: integracji prędkości kątowej i optymalizacji grafu w SE(3), bez przedstawiania rozwiązania jako pełnego VIO. Źródła: literatura IMU, Grisetti i kod modułów imu oraz pose_graph.py. Materiał: dwa niewielkie schematy przepływu informacji.
-\label{sec:imu_i_graf}
+\textbf{Problem PnP} (ang. \textit{Perspective-n-Point}) polega na wyznaczeniu pozy skalibrowanej kamery na podstawie zbioru korespondencji pomiędzy punktami $\mathbf{X}_i$ o~znanych współrzędnych 3D a~ich obserwacjami $\mathbf{u}_i$ na obrazie~\cite{lepetit2009epnp}. Przyjmując, że punkty 3D są zapisane w~układzie świata $W$, szukane parametry $\mathbf{R}$ i~$\mathbf{t}$ transformują je do układu kamery $C$ i~spełniają
+\begin{equation}
+s_i\bar{\mathbf{u}}_i
+=
+\mathbf{K}
+\left(
+\mathbf{R}\mathbf{X}_i+\mathbf{t}
+\right),
+\label{eq:pnp}
+\end{equation}
+gdzie $\bar{\mathbf{u}}_i$ jest punktem obrazu zapisanym we współrzędnych jednorodnych, $s_i$ współczynnikiem skali projekcji, a~$\mathbf{K}$ macierzą parametrów wewnętrznych kamery.
 
-\subsection{Żyroskop w systemie wizyjnym}
-% Plan: Wyjaśnić całkowanie prędkości kątowej, transformację pomiaru do układu kamery, kompensację ruchu i prior rotacji oraz ograniczenia bez biasów i akcelerometru. Źródła: literatura VIO, Kneipa, Troiani i core/imu.py. Materiał: schemat obrotowego przekształcenia zdarzeń do czasu referencyjnego.
-\label{subsec:zyroskop}
+Wyznaczone parametry opisują transformację
+\begin{equation}
+\mathbf{T}_{CW}
+=
+\begin{bmatrix}
+\mathbf{R} & \mathbf{t} \\
+\mathbf{0}^T & 1
+\end{bmatrix},
+\end{equation}
+czyli transformację punktów z~układu świata do układu kamery. Jeżeli poza kamery jest w~pracy reprezentowana jako $\mathbf{T}_{WC}$, należy zastosować transformację odwrotną $\mathbf{T}_{WC}=\mathbf{T}_{CW}^{-1}$.
 
-\subsection{Graf pozy i domykanie pętli}
-% Plan: Zdefiniować węzły, krawędzie odometryczne i pętli, błąd na SE(3) oraz odporną optymalizację. Źródła: Grisetti oraz pose_graph.py. Materiał: przykładowy graf przed i po dodaniu zweryfikowanej pętli.
-\label{subsec:graf_pozy}
+W~praktyce część korespondencji 3D--2D może być błędna. Do odpornej estymacji pozy można zastosować \textbf{RANSAC} (ang. \textit{Random Sample Consensus}), który wielokrotnie losuje minimalne podzbiory danych, wyznacza na ich podstawie hipotezę modelu, a~następnie określa zbiór obserwacji zgodnych z~tą hipotezą w~zadanej tolerancji~\cite{fischler1981ransac}.
+
+W~przypadku PnP zgodność korespondencji można oceniać na podstawie \textbf{błędu reprojekcji}, czyli odległości pomiędzy zmierzonym punktem obrazu $\mathbf{u}_i$ a~położeniem $\hat{\mathbf{u}}_i$ otrzymanym przez ponowną projekcję odpowiadającego mu punktu 3D:
+\begin{equation}
+e_i
+=
+\left\|
+\mathbf{u}_i-\hat{\mathbf{u}}_i
+\right\|_2.
+\label{eq:reprojection_error}
+\end{equation}
+Korespondencje, dla których błąd jest mniejszy od przyjętego progu, tworzą zbiór obserwacji zgodnych z~daną hipotezą. Po wybraniu najlepszego zbioru model może zostać ponownie wyznaczony z~wykorzystaniem wszystkich należących do niego obserwacji~\cite{fischler1981ransac}.
+
+
+\section{Graf pozy i domykanie pętli}
+\label{sec:graf_pozy}
+
+\textbf{Graf pozy} jest reprezentacją trajektorii, w~której węzły odpowiadają pozom robota, a~krawędzie opisują ograniczenia pomiędzy parami póz~\cite{grisetti2010graph}. Poza węzła $i$ jest zapisana jako $\mathbf{T}_i=\mathbf{T}_{W C_i}\in SE(3)$, czyli przekształca współrzędne z~układu kamery $C_i$ do układu świata $W$.
+
+Krawędź $(i,j)$ zawiera pomiar względnej transformacji $\mathbf{Z}_{ij}=\mathbf{T}_{C_i C_j}$. Zgodnie z~konwencją przyjętą w~podsekcji~\ref{subsec:translacja_i_rotacja} transformacja ta przekształca współrzędne z~układu kamery $C_j$ do układu kamery $C_i$. Krawędź może być również związana z~macierzą informacji $\boldsymbol{\Omega}_{ij}$, określającą względne znaczenie poszczególnych składowych błędu~\cite{grisetti2010graph}.
+
+Na podstawie aktualnych oszacowań obu póz można przewidzieć transformację względną:
+\begin{equation}
+    \hat{\mathbf{Z}}_{ij}
+    =
+    \mathbf{T}_i^{-1}\mathbf{T}_j.
+    \label{eq:predicted_relative_pose}
+\end{equation}
+
+Zgodność pomiaru z~aktualnymi pozami można sprawdzić, obliczając transformację błędu:
+\begin{equation}
+    \mathbf{E}_{ij}
+    =
+    \mathbf{Z}_{ij}^{-1}\hat{\mathbf{Z}}_{ij}.
+    \label{eq:pose_graph_error_transform}
+\end{equation}
+Jeżeli pomiar i~przewidywanie są identyczne, to $\mathbf{E}_{ij}=\mathbf{I}$. Macierz błędu zawiera jednak jednocześnie translację i~obrót, dlatego nie jest bezpośrednio używana jako reszta optymalizacji.
+
+Mapa logarytmiczna grupy $SE(3)$ przekształca transformację błędu w~wektor sześciowymiarowy:
+\begin{equation}
+    \mathbf{e}_{ij}
+    =
+    \operatorname{Log}\!\left(\mathbf{E}_{ij}\right)
+    =
+    \operatorname{Log}\!\left(
+        \mathbf{Z}_{ij}^{-1}
+        \mathbf{T}_i^{-1}
+        \mathbf{T}_j
+    \right)
+    \in\mathbb{R}^{6}.
+    \label{eq:pose_graph_error}
+\end{equation}
+Operator $\operatorname{Log}$ w~równaniu~\eqref{eq:pose_graph_error} nie oznacza obliczania logarytmu każdego elementu macierzy. Odwzorowuje on transformację należącą do $SE(3)$ na sześć liczb: trzy składowe opisujące błąd translacji oraz trzy składowe wektora obrotu. Kierunek wektora obrotu wyznacza oś obrotu, a~jego długość odpowiada wartości kąta wyrażonej w~radianach. Dla $\mathbf{E}_{ij}=\mathbf{I}$ otrzymuje się $\mathbf{e}_{ij}=\mathbf{0}$~\cite{blanco2021se3}.
+
+Optymalizacja grafu polega na znalezieniu takich póz, dla których ważone błędy wszystkich krawędzi są możliwie małe:
+\begin{equation}
+    \min_{\{\mathbf{T}_i\}}
+    \sum_{(i,j)\in\mathcal{E}}
+    \rho\!\left(
+        \mathbf{e}_{ij}^{T}
+        \boldsymbol{\Omega}_{ij}
+        \mathbf{e}_{ij}
+    \right),
+    \label{eq:pose_graph}
+\end{equation}
+gdzie $\mathcal{E}$ jest zbiorem krawędzi, a~$\rho$ oznacza odporną funkcję kosztu ograniczającą wpływ dużych błędów. Ważenie poszczególnych składowych jest istotne między innymi dlatego, że błędy translacji i~rotacji mają różne jednostki.
+
+Pierwsza poza grafu jest zwykle ustalana, ponieważ jednoczesne wykonanie tej samej sztywnej transformacji na wszystkich węzłach nie zmienia żadnej transformacji względnej. Usuwa to swobodę globalnej translacji i~rotacji rozwiązania~\cite{grisetti2010graph}.
+
+\textbf{Domknięcie pętli} (ang. \textit{loop closure}) polega na wykryciu, że robot ponownie obserwuje wcześniej odwiedzony fragment otoczenia. Umożliwia to dodanie krawędzi pomiędzy węzłami odległymi w~czasie i~skorygowanie narastającego dryfu trajektorii.
+
+Kandydaci na domknięcie pętli mogą być wybierani na podstawie podobieństwa bieżącej obserwacji do wcześniej zapisanych klatek. Samo podobieństwo wizualne nie potwierdza jednak zgodności geometrycznej, dlatego przed dodaniem krawędzi konieczne jest wyznaczenie transformacji względnej i~sprawdzenie jakości dopasowania~\cite{murartal2015orbslam}.
+
+\section{Wyrównanie trajektorii metodą Umeyamy}
+\label{subsec:wyrownanie_umeyamy}
+
+Trajektoria estymowana i~trajektoria referencyjna mogą opisywać ten sam ruch, ale być zapisane w~różnych układach współrzędnych. Bezpośrednie porównanie odpowiadających sobie pozycji prowadziłoby wtedy do błędu wynikającego nie tylko z~niedokładności estymacji ruchu, lecz również z~różnicy pomiędzy przyjętymi układami odniesienia. Z~tego powodu przed obliczeniem błędu trajektorie mogą zostać wzajemnie wyrównane~\cite{sturm2012benchmark}.
+
+Metoda Umeyamy wyznacza pojedynczą transformację, która w~sensie najmniejszych kwadratów najlepiej nakłada zbiór pozycji estymowanych na odpowiadające im pozycje referencyjne~\cite{umeyama1991least}. Dla par punktów $\mathbf{x}_i,\mathbf{y}_i\in\mathbb{R}^3$, oznaczających odpowiednio pozycję estymowaną i~referencyjną w~tej samej chwili, rozwiązywane jest zadanie
+\begin{equation}
+    \underset{s,\mathbf{R},\mathbf{t}}{\operatorname{min}}
+    \frac{1}{N}\sum_{i=1}^{N}
+    \left\|
+        \mathbf{y}_i-
+        \left(
+            s\mathbf{R}\mathbf{x}_i+\mathbf{t}
+        \right)
+    \right\|^2,
+    \qquad
+    \mathbf{R}\in SO(3),
+    \label{eq:umeyama_objective}
+\end{equation}
+gdzie $\mathbf{R}$ opisuje obrót pomiędzy układami współrzędnych, $\mathbf{t}$ ich względne przesunięcie, a~$s$ jest współczynnikiem skali.
+
+Istotne jest, że ta sama transformacja jest stosowana do całej trajektorii. Wyrównanie nie koryguje więc lokalnych błędów estymacji ani narastającego dryfu, lecz usuwa globalną różnicę położenia i~orientacji pomiędzy układami odniesienia. Po wyrównaniu odległość pomiędzy odpowiadającymi sobie punktami trajektorii wynika zatem z~różnic w~oszacowanym przebiegu ruchu, a~nie z~dowolnego wyboru początku i~orientacji układu współrzędnych.
+
+W~wariancie $SE(3)$ przyjmuje się $s=1$, dlatego wyrównaniu podlegają wyłącznie obrót i~translacja. Zachowana zostaje wówczas skala wyznaczona przez algorytm. W~wariancie $Sim(3)$ współczynnik $s$ jest dodatkowo estymowany, co pozwala usunąć również stałą globalną różnicę skali pomiędzy trajektoriami~\cite{umeyama1991least}. Zastosowanie $Sim(3)$ powoduje jednak, że globalny błąd skali nie jest uwzględniany w~późniejszej ocenie, dlatego wybór rodzaju wyrównania powinien odpowiadać temu, jaki aspekt działania systemu ma być oceniany.

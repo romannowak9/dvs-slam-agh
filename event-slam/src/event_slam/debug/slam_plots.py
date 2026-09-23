@@ -25,17 +25,26 @@ def save_sparse_map_plot(
     landmark_positions_C_anchor: np.ndarray,
     observation_counts: np.ndarray,
     path: Path,
-    max_plot_distance: float = 5.0,
+    max_plot_distance: float | None = None,
 ) -> Path:
-    """Plot keyframe trajectory and landmarks close to their anchor camera."""
+    """Plot the keyframe trajectory and stored map landmarks.
+
+    By default every landmark present in ``landmarks.csv`` is shown.  A finite
+    ``max_plot_distance`` can still be supplied to restrict the visualization
+    to landmarks close to their anchor camera.
+    """
     keyframe_positions_W = _points3(keyframe_positions_W)
     landmark_positions_W = _points3(landmark_positions_W)
     landmark_positions_C_anchor = _points3(landmark_positions_C_anchor)
     observation_counts = np.asarray(observation_counts)
 
-    visible = (
-        np.linalg.norm(landmark_positions_C_anchor, axis=1) <= max_plot_distance
-    )
+    if max_plot_distance is None:
+        visible = np.ones(len(landmark_positions_W), dtype=bool)
+    else:
+        visible = (
+            np.linalg.norm(landmark_positions_C_anchor, axis=1)
+            <= max_plot_distance
+        )
     positions_W = landmark_positions_W[visible]
     observations = observation_counts[visible]
 
@@ -61,18 +70,59 @@ def save_sparse_map_plot(
     )
     axes.set_xlabel("world X - right [m]")
     axes.set_ylabel("world Z - forward [m]")
-    axes.set_zlabel("world Y - down [m]")
-    axes.invert_zaxis()
+    axes.set_zlabel("world Y [m]")
+    if max_plot_distance is None:
+        landmark_summary = f"{len(positions_W)} landmarks"
+    else:
+        landmark_summary = (
+            f"{len(positions_W)}/{len(landmark_positions_W)} landmarks within "
+            f"{max_plot_distance:g} m"
+        )
     axes.set_title(
-        f"Sparse map: {len(keyframe_positions_W)} keyframes, "
-        f"{len(positions_W)}/{len(landmark_positions_W)} landmarks within "
-        f"{max_plot_distance:g} m"
+        f"Sparse map: {len(keyframe_positions_W)} keyframes, {landmark_summary}"
     )
     axes.legend()
     figure.colorbar(scatter, ax=axes, label="observation count", shrink=0.7)
     figure.tight_layout()
+    saved_path = _save_figure(figure, path)
 
-    return _save_figure(figure, path)
+    top_path = path.with_name(f"{path.stem}_top{path.suffix}")
+    top_figure, top_axes = plt.subplots(figsize=(10, 8))
+    top_scatter = top_axes.scatter(
+        positions_W[:, 0],
+        positions_W[:, 2],
+        c=observations,
+        cmap="viridis",
+        s=4,
+        alpha=0.7,
+        label="landmarks",
+    )
+    top_axes.plot(
+        keyframe_positions_W[:, 0],
+        keyframe_positions_W[:, 2],
+        "r.-",
+        linewidth=1.5,
+        label="keyframes",
+    )
+    top_axes.set_xlabel("world X - right [m]")
+    top_axes.set_ylabel("world Z - forward [m]")
+    top_axes.set_title(
+        f"Sparse map - top view: {len(keyframe_positions_W)} keyframes, "
+        f"{landmark_summary}"
+    )
+    top_axes.set_aspect("equal", adjustable="box")
+    top_axes.grid(True, linewidth=0.5, alpha=0.4)
+    top_axes.legend()
+    top_figure.colorbar(
+        top_scatter,
+        ax=top_axes,
+        label="observation count",
+        shrink=0.7,
+    )
+    top_figure.tight_layout()
+    _save_figure(top_figure, top_path)
+
+    return saved_path
 
 
 def save_tracking_diagnostics_plot(

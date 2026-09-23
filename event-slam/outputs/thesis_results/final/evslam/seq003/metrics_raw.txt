@@ -1,0 +1,34 @@
+EvSLAM metrics
+================================================================================
+estimate: outputs/evslam_final_output_try3/seq003/result_seq003.txt
+ground_truth: /data/evSLAM/gt/seq003_gt.txt
+estimate_sample_count: 411
+gt_sample_count: 411
+matched_sample_count: 410
+estimate_coverage: 0.997566910
+gt_coverage: 0.997566910
+
+Position metrics
+--------------------------------------------------------------------------------
+ATE: 9.398153185
+ATE_RMSE: 11.270170532
+ATE_median: 4.729882315
+ATE_max: 17.794876716
+rotation_RMSE_deg: 93.569590403
+RPE_delta_target_s: 1.000000000
+RPE_delta_median_s: 1.000000000
+RPE_pair_count: 400
+RPE_translation_RMSE_m: 0.191900307
+RPE_rotation_RMSE_deg: 1.456910105
+
+Velocity metrics
+--------------------------------------------------------------------------------
+xi_min: 0.000000000
+xi_max: 1.000000000
+xi_count: 1001
+RVE_sample_count: 410
+AUC: 0.852129351
+AUC_normalized: 0.852129351
+mean_RVE: 1.526252395
+median_RVE: 0.560215684
+max_RVE: 41.601572450

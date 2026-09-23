@@ -1,0 +1,23 @@
+EvSLAM metrics
+================================================================================
+estimate: outputs/evslam_seq007_slam_final/comparison_stage2_aligned_sim3_matched.txt
+ground_truth: outputs/evslam_seq007_slam_final/comparison_stage2_gt_matched.txt
+sample_count: 275
+
+Position metrics
+--------------------------------------------------------------------------------
+ATE: 0.139874213
+ATE_RMSE: 0.158374932
+ATE_median: 0.132545089
+ATE_max: 0.358556187
+
+Velocity metrics
+--------------------------------------------------------------------------------
+xi_min: 0.000000000
+xi_max: 1.000000000
+xi_count: 1001
+AUC: 0.799970279
+AUC_normalized: 0.799970279
+mean_RVE: 0.229711020
+median_RVE: 0.131698748
+max_RVE: 1.269991166

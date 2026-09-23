@@ -1,0 +1,37 @@
+M3ED metrics in the common EvSLAM-compatible protocol
+================================================================================
+estimate: outputs/thesis_experiments_window24/02_ablations/baf/m3ed/disabled/falcon_indoor_flight_1.txt
+ground_truth: outputs/thesis_experiments_window24/00_configs/references/falcon_indoor_flight_1_gt_005_020.txt
+estimate_sample_count: 150
+gt_sample_count: 150
+matched_sample_count: 150
+timestamp_tolerance_s: 0.010000000
+alignment: se3
+estimate_coverage: 1.000000000
+gt_coverage: 1.000000000
+estimate_velocity_source: interpolated_from_outputs/thesis_experiments_window24/02_ablations/baf/m3ed/disabled/velocity.csv
+estimate_velocity_smoothing_window: 41
+estimate_velocity_median_dt_s: 0.024000000
+gt_velocity_source: derived_from_gt_pose
+gt_velocity_smoothing_window: 11
+gt_velocity_smoothing_poly_order: 2
+
+Position metrics
+--------------------------------------------------------------------------------
+position_error_mean_m: 0.095967068
+ATE_RMSE_m: 0.103273365
+position_error_median_m: 0.086937082
+position_error_max_m: 0.211476205
+rotation_RMSE_deg: 1.539987862
+RPE_delta_target_s: 1.000000000
+RPE_delta_median_s: 0.999801000
+RPE_pair_count: 139
+RPE_translation_RMSE_m: 0.068325102
+RPE_rotation_RMSE_deg: 0.481722351
+
+Velocity metrics
+--------------------------------------------------------------------------------
+xi_min: 0.000000000
+xi_max: 1.000000000
+xi_count: 500
+AUC: 0.866016736

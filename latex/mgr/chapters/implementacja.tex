@@ -1,43 +1,318 @@
 \chapter{Implementacja systemu}
-% Plan: Opisać realizację modułów w Pythonie zgodnie z aktualnym kodem, z naciskiem na interfejsy, walidację danych i mechanizmy odporności. Źródła: src/event_slam i używany runner. Materiał: wybrane diagramy sekwencji oraz przykłady danych po etapach.
 \label{cha:implementacja}
 
-\section{Odczyt, kalibracja i synchronizacja danych}
-% Plan: Porównać reader ROS bag dla EvSLAM i strumieniowy reader H5 dla M3ED, omówić wspólne okna stereo i wczytywanie kalibracji. Źródła: datasets, calibration, event_window.py oraz run_event_slam.py. Materiał: tabela formatów wejścia i schemat synchronizacji osi czasu.
+System zaimplementowano w~języku Python z~wykorzystaniem bibliotek \textit{NumPy}, \textit{OpenCV} i~\textit{SciPy}. W~rozdziale opisano obliczenia wykonywane na kolejnych etapach oraz wizualizacje wyjść z poszczególnych etapów.
+
+\section{Odczyt i przygotowanie danych}
 \label{sec:implementacja_wejscie}
 
+Dane wejściowe pochodzą z~gotowych zbiorów EvSLAM i~M3ED. Ze względu na różne sposoby ich zapisu (pliki \textit{.bag} dla EvSLAM i \textit{.h5} dla M3ED) zastosowano osobne mechanizmy odczytu, które przekazują do dalszego przetwarzania:
+
+\begin{itemize}
+    \item dwa strumienie zdarzeń zawierających współrzędne piksela, znacznik czasu i~polaryzację;
+    \item parametry wewnętrzne, modele dystorsji i~rozdzielczości obu kamer;
+    \item transformację $\mathbf{T}_{C_R C_L}$ opisującą wzajemne położenie kamer;
+    \item opcjonalne pomiary prędkości kątowej oraz transformacje $\mathbf{T}_{C_L I}$ i~$\mathbf{T}_{C_R I}$ z~układu IMU do układów kamer.
+\end{itemize}
+
+System odczytuje wartości kalibracji, dostarczone wraz ze zbiorem, i weryfikuje ich poprawność. Pomiary żyroskopu są porządkowane według czasu, a~próbki o~powtórzonych znacznikach są usuwane.
+
+Zdarzenia z~obu kamer są dzielone na wspólne okna $\mathcal{W}_k=[t_{s,k},t_{e,k})$. Każdemu oknu przypisywany jest znacznik odpowiadający środkowi przedziału.
+
 \section{Przetwarzanie zdarzeń}
-% Plan: Opisać BAF, kompensację obrotową z żyroskopu, agregację do obrazów aktywności i rektyfikację, z parametrami odsyłającymi do konkretnych YAML. Źródła: events, stereo_rectifier.py i zapisane run_config.yaml. Materiał: obrazy przed i po każdym etapie.
 \label{sec:implementacja_zdarzenia}
 
-\subsection{Okna i filtr aktywności tła}
-% Plan: Wyjaśnić budowę zsynchronizowanych okien i kryterium sąsiedztwa BAF oraz zachowanie na pustych lub brzegowych fragmentach. Źródła: event_window.py i event_filter.py. Materiał: oś czasu okien stereo i porównanie liczby zdarzeń.
+\subsection{Filtr aktywności tła}
 \label{subsec:okna_baf}
 
-\subsection{Kompensacja ruchu i agregacja}
-% Plan: Opisać dyskretyzację czasu, obrót promieni do chwili referencyjnej i tryby tworzenia obrazu zdarzeniowego. Źródła: imu_motion_compensation.py i event_aggregator.py. Materiał: zestawienie obrazu bez i z kompensacją dla tego samego okna.
-\label{subsec:kompensacja_agregacja}
+Filtr aktywności tła (ang. \textit{background activity filter}, BAF) odrzuca zdarzenia bez dostatecznego wsparcia w~bliskim otoczeniu przestrzennym i~czasowym. Ideę takiego testu pokazano na rysunku~\ref{fig:baf_neighborhood_source}~\cite{guo2023denoising}. W~opracowanym wariancie zamiast wyszukiwania najbliższych sąsiadów zliczane są aktywne piksele w~stałym, kwadratowym otoczeniu.
 
-\section{Śledzenie i głębokość stereo}
-% Plan: Przedstawić trwałe ID śladów, uzupełnianie puli cech, stereo LK, kontrole epipolarne, lewo--prawo, dysparycji i głębokości. Źródła: feature_tracker.py i stereo_depth.py. Materiał: wizualizacja śladów oraz histogram zaakceptowanych głębokości.
-\label{sec:implementacja_frontend}
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=0.9\textwidth]{implementation_baf_neighborhood_guo2023.png}
+    \caption{Zasada stosowana w~filtrach aktywności tła. Źródło:~\cite{guo2023denoising}.}
+    \label{fig:baf_neighborhood_source}
+\end{figure}
+
+Dla każdej kamery filtr przechowuje czas ostatniego zdarzenia w~każdym pikselu. Nowe zdarzenie jest zachowywane, jeżeli w~kwadratowym sąsiedztwie o~rozmiarze $n \times n$ (lub $(2r+1)\times(2r+1)$ stosując promień, który w algorytmie jest parametrem filtru) wystąpiło co najmniej $k$ zdarzeń w~czasie nie dłuższym niż $t$. W~przeciwnym przypadku zostaje uznane za odosobnione zdarzenie tła i~odrzucone. Polaryzacja nie wpływa na decyzję filtra.
+
+W~końcowej konfiguracji EvSLAM, na podstawie prób i testów rozwojowych przyjęto $r=2$, czyli otoczenie $5\times5$ pikseli, czas $t=10\,\mathrm{ms}$ i~wymaganie co najmniej $k=5$ aktywnych sąsiadów. Wpływ filtra o takich parametrach na klatkę zdarzeniową pokazano na rysunku~\ref{fig:implementation_baf_comparison}. Dla M3ED filtr wyłączono.
+
+\begin{figure}[!ht]
+    \centering
+    \begin{subfigure}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{implementation_evslam_seq007_baf_before.png}
+        \caption{Reprezentacja bez filtracji.}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{implementation_evslam_seq007_baf_after.png}
+        \caption{Reprezentacja po filtracji BAF.}
+    \end{subfigure}
+    \caption{Wpływ filtra aktywności tła na reprezentację zdarzeń lewej kamery dla tego samego okna sekwencji \texttt{seq007\_test} ze zbioru EvSLAM. Niebieskie i~czerwone piksele reprezentacji wejściowych oznaczają odpowiednio zdarzenia dodatnie i~ujemne. Ponieważ szum jest stosunkowo niewielki, żeby zaobserwować efekty są widoczne dopiero po dokładniejszej obserwacji.}
+    \label{fig:implementation_baf_comparison}
+\end{figure}
+
+\subsection{Kompensacja ruchu obrotowego}
+\label{subsec:kompensacja_ruchu}
+Zastosowane rozwiązanie oparto na metodzie tworzenia obrazów zdarzeniowych skompensowanych ruchem, przedstawionej w pracy \cite{rebecq2017eventvio} oraz wykorzystanej później w~systemie UltimateSLAM~\cite{vidal2018ultimate}. W~metodach tych zdarzenia są przenoszone do wspólnej chwili na podstawie ruchu wyznaczonego z~pomiarów inercyjnych. W~opracowanym systemie zastosowano uproszczenie ograniczające kompensację do obrotu zmierzonego przez żyroskop. Dzięki temu nie jest wymagana znajomość głębokości poszczególnych zdarzeń.
+
+Kompensacja ruchu przenosi zdarzenia z~różnych chwil do wspólnego czasu odniesienia, którym jest środek okna. Zdarzenia są dzielone na stałą liczbę przedziałów czasowych (przyjęto $32$). Dla każdego przedziału przyjmowany jest średni czas należących do niego zdarzeń, dzięki czemu nie trzeba wyznaczać osobnego obrotu dla każdego zdarzenia.
+
+Obrót pomiędzy średnim czasem przedziału a~czasem odniesienia jest obliczany przez całkowanie pomiarów żyroskopu. Próbki na granicach tego zakresu są wyznaczane przez interpolację. Dla dwóch kolejnych chwil $t_i$ i~$t_{i+1}$ przyrost obrotu wynosi
+\begin{equation}
+    \Delta\boldsymbol{\theta}_i=
+    \frac{\boldsymbol{\omega}_i+\boldsymbol{\omega}_{i+1}}{2}\Delta t_i,
+    \qquad
+    \Delta t_i=t_{i+1}-t_i,
+    \label{eq:implementation_gyro_integration}
+\end{equation}
+gdzie $\boldsymbol{\omega}_i$ i~$\boldsymbol{\omega}_{i+1}$ są pomiarami prędkości kątowej, a~$\Delta\boldsymbol{\theta}_i$ jest wektorem obrotu. Kierunek tego wektora wyznacza oś obrotu, natomiast jego długość odpowiada kątowi wyrażonemu w~radianach. Wektor jest przekształcany w~macierz obrotu, a~kolejne przyrosty są składane zgodnie z~kolejnością pomiarów~\cite{forster2015preintegration}. System nie estymuje obciążenia żyroskopu. Otrzymany obrót jest przenoszony z~układu IMU do układu odpowiedniej kamery z~wykorzystaniem kalibracji między czujnikami.
+
+Wektor zapisuje obrót: kąt dla każdej osi. Kąt obrotu jest równy długości tego wektora:
+\begin{equation}
+    \alpha_i=\left\|\Delta\boldsymbol{\theta}_i\right\|,
+    \qquad
+    \mathbf{a}_i=\frac{\Delta\boldsymbol{\theta}_i}{\alpha_i},
+    \label{eq:implementation_axis_angle}
+\end{equation}
+gdzie $\mathbf{a}_i=(a_x,a_y,a_z)^T$ jest jednostkowym wektorem osi obrotu. Na jego podstawie tworzona jest macierz
+\begin{equation}
+    \mathbf{S}_i=
+    \begin{bmatrix}
+        0 & -a_z & a_y\\
+        a_z & 0 & -a_x\\
+        -a_y & a_x & 0
+    \end{bmatrix},
+    \qquad
+    \Delta\mathbf{R}_i=
+    \mathbf{I}+\sin(\alpha_i)\mathbf{S}_i+
+    \left(1-\cos(\alpha_i)\right)\mathbf{S}_i^2,
+    \label{eq:implementation_rodrigues}
+\end{equation}
+gdzie $\mathbf{I}$ oznacza macierz jednostkową. Jest to wzór Rodriguesa przekształcający obrót opisany osią i~kątem w~macierz obrotu~\cite{blanco2021se3}. Dla zerowego kąta przyjmowana jest macierz jednostkowa. Macierze kolejnych przyrostów są następnie składane zgodnie z~kolejnością pomiarów.
+
+Dla zdarzenia zarejestrowanego w~pikselu $\bar{\mathbf{u}}_k=(x_k,y_k,1)^T$ nowe położenie jest wyznaczane jako
+\begin{equation}
+    \bar{\mathbf{u}}'_k\sim
+    \mathbf{K}\mathbf{R}_{C_r C_k}\mathbf{K}^{-1}\bar{\mathbf{u}}_k,
+    \label{eq:implementation_motion_compensation}
+\end{equation}
+gdzie $\mathbf{K}$ jest macierzą parametrów wewnętrznych kamery, a~$\mathbf{R}_{C_r C_k}$ przekształca kierunek obserwacji z~chwili zdarzenia $t_k$ do czasu odniesienia $t_r$. Najpierw współrzędne piksela są więc zamieniane na kierunek obserwacji za pomocą $\mathbf{K}^{-1}$, następnie ten kierunek jest obracany, a~macierz $\mathbf{K}$ ponownie przekształca go na współrzędne obrazu. Symbol $\sim$ oznacza równość z~dokładnością do skali; współrzędne piksela otrzymuje się po podzieleniu dwóch pierwszych elementów wyniku przez element trzeci.
+Otrzymane współrzędne są zaokrąglane do najbliższego piksela, a~zdarzenia przeniesione poza obraz zostają odrzucone. Kompensowany jest wyłącznie obrót kamery. Uwzględnienie translacji wymagałoby znajomości głębokości każdego zdarzenia, która na tym etapie nie jest jeszcze dostępna.
+Po kompensacji widocznej na rysunku~\ref{fig:implementation_motion_compensation} krawędzie są węższe, a~przeciwne polaryzacje lepiej się pokrywają. Jeżeli próbki IMU nie obejmują całego przedziału, okno jest przetwarzane bez kompensacji. Można zaobserwować, że obrót własny robota, który powodował część rozmycia ruchu, został skutecznie skompensowany. Rozmycie ruchu wynikające z translacji robota pozostaje.
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=0.9\textwidth]{implementation_evslam_seq007_rotation_compensation.png}
+    \caption{Reprezentacje zdarzeń lewej i~prawej kamery przed kompensacją obrotu oraz po jej wykonaniu dla fragmentu sekwencji \texttt{seq007\_test} ze zbioru EvSLAM \cite{evslam2025data}.}
+    \label{fig:implementation_motion_compensation}
+\end{figure}
+
+\subsection{Agregacja zdarzeń}
+\label{subsec:implementacja_agregacja}
+
+Po filtracji i~opcjonalnej kompensacji każde okno jest przekształcane w~ośmiobitową reprezentację obrazową. Zaimplementowano standardową klatkę zdarzeniową opisaną równaniem~\eqref{eq:standard_event_frame} oraz wykładniczo zanikającą klatkę zdarzeniową z~równania~\eqref{eq:exponential_event_frame}. W~obu wariantach wykorzystywane jest ostatnie zdarzenie zarejestrowane w~każdym pikselu.
+
+Wartość 127 oznacza piksel bez zdarzenia. W~wariancie standardowym zdarzenie dodatnie otrzymuje wartość 255, a~ujemne 0. W~wariancie wykładniczym odchylenie od wartości neutralnej maleje wraz z~wiekiem zdarzenia. W konfiguracjach końcowych stosowany jest wariant wykładniczy ze stałą zaniku $\tau$, przyjmowaną jako równa czasowi agregacji ramek. Porównanie obu zaimplementowanych reprezentacji z~odpowiadającą im klatką intensywności przedstawiono na rysunku~\ref{fig:implementation_event_representations}.
+
+\begin{figure}[!ht]
+    \centering
+    \begin{subfigure}[t]{0.31\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{implementation_evslam_seq007_intensity_frame.png}
+        \caption{Klatka RGB z tradycyjnej kamery.}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.31\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{implementation_evslam_seq007_standard_event_frame.png}
+        \caption{Standardowa klatka zdarzeniowa. $t=12ms$.}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.31\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{implementation_evslam_seq007_exponential_event_frame.png}
+        \caption{Wykładniczo zanikająca klatka zdarzeniowa. $t=12ms$; $\tau=8ms$.}
+    \end{subfigure}
+    \caption{Porównanie klatki kamery konwencjonalnej i~dwóch zaimplementowanych reprezentacji tego samego fragmentu danych EvSLAM. W~wizualizacji kolor niebieski oznacza zdarzenia dodatnie, a~czerwony zdarzenia ujemne.}
+    \label{fig:implementation_event_representations}
+\end{figure}
+
+\subsection{Rektyfikacja}
+\label{subsec:implementacja_rektyfikacja}
+
+Mapy rektyfikacji są wyznaczane raz, z~parametrów obu kamer i~transformacji $\mathbf{T}_{C_R C_L}$. Obrazy wynikowe mają wspólne położenie punktów głównych i~obejmują wspólne pole widzenia. Reprezentacje są przemapowywane z~interpolacją najbliższego sąsiada, aby nie tworzyć pośrednich wartości między rzadkimi strukturami zdarzeniowymi. Na rysunku~\ref{fig:implementation_rectification} odpowiadające sobie fragmenty przecinają te same poziome linie.
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=\textwidth]{implementation_evslam_seq007_stereo_rectification.png}
+    \caption{Zrektyfikowana para reprezentacji zdarzeń z~zaznaczonymi poziomymi liniami pomocniczymi.}
+    \label{fig:implementation_rectification}
+\end{figure}
+
+\section{Śledzenie cech i wyznaczanie głębokości}
+\label{sec:implementacja_sledzenie_stereo}
+
+Na lewej zrektyfikowanej reprezentacji wykrywane jest do 1000 punktów GFTT~\cite{shi1994good}. Pomiędzy oknami są one śledzone piramidalną metodą Lucas--Kanade~\cite{lucas1981iterative}, z~oknem $21\times21$ pikseli i~czterema poziomami piramidy. Ślady niepoprawne lub kończące się poza obrazem są odrzucane, a~w~miejscach oddalonych o~co najmniej siedem pikseli od aktywnych cech wykrywane są nowe punkty. Wynik pokazano na rysunku~\ref{fig:implementation_tracking}.
+
+Dopasowanie stereo również wykorzystuje metodę Lucas--Kanade. Punkt w~prawej reprezentacji musi leżeć wewnątrz obrazu, mieć dodatnią dysparycję z~zadanego zakresu i~różnić się pionowo o~nie więcej niż dwa piksele. Dla EvSLAM stosowana jest dodatkowo kontrola w~obu kierunkach: po przeniesieniu punktu z~lewego obrazu do prawego i~z~powrotem błąd nie może przekroczyć jednego piksela.
+
+Zaakceptowane pary są triangulowane zgodnie z~równaniami~\eqref{eq:disparity} i~\eqref{eq:stereo_point}. Odrzucane są punkty o~niepoprawnych współrzędnych oraz głębokości spoza skonfigurowanego zakresu. Punkty dodawane do mapy są ograniczone do $10\,\mathrm{m}$, ponieważ głębokość odległych punktów, odpowiadających małym wartościom dysparycji, jest szczególnie wrażliwa na błąd dopasowania. Przykład zaakceptowanych korespondencji przedstawiono na rysunku~\ref{fig:implementation_stereo_depth}.
+
+\begin{figure}[!ht]
+    \centering
+    \begin{subfigure}[t]{0.72\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{implementation_evslam_seq007_feature_tracking.png}
+        \caption{Śledzenie punktów na lewej reprezentacji. Zielone odcinki łączą położenia punktów uznanych za te same w~poprzednim i~bieżącym oknie, a~żółte kropki oznaczają ich bieżące położenia. W centrum obrazu można zaobserwować błędnie śledzone punkty -- zmiana ich położenia nie jest zgodna z ruchem kamery. Wartości \texttt{tracks}, \texttt{active} i~\texttt{redetect} oznaczają odpowiednio liczbę poprawnie prześledzonych punktów, wszystkich aktywnych punktów oraz nowych punktów wykrytych po zakończeniu śledzenia.}
+        \label{fig:implementation_tracking}
+    \end{subfigure}
+    \par\medskip
+    \begin{subfigure}[t]{\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{implementation_evslam_seq007_stereo_depth.png}
+        \caption{Dopasowania pomiędzy lewą i~prawą reprezentacją. Kropki wskazują położenia odpowiadających sobie punktów, a~linie łączą pary korespondencji. Zmiana ich koloru od żółtego do czerwonego oznacza wzrost wyznaczonej głębokości. Wartości \texttt{in}, \texttt{matched} i~\texttt{3d} oznaczają liczbę punktów przekazanych do dopasowania, zaakceptowanych korespondencji i~poprawnie wyznaczonych punktów 3D, natomiast \texttt{z\_med} jest medianą ich głębokości wyrażoną w~metrach.}
+        \label{fig:implementation_stereo_depth}
+    \end{subfigure}
+    \caption{Wyniki pośrednie śledzenia cech i~wyznaczania rzadkiej głębokości stereo.}
+    \label{fig:implementation_tracking_stereo}
+\end{figure}
 
 \section{Estymacja pozy kamery}
-% Plan: Opisać PnP względem lokalnej mapy, fallback frame-to-frame, użycie prioru rotacji i wszystkie kryteria odrzucenia kroku. Źródła: vo/pnp.py, slam/local_matching.py i slam/stereo_pnp.py. Materiał: schemat źródeł korespondencji i tabela progów z wybranego run_config.yaml.
 \label{sec:implementacja_pozy}
 
-\section{Mapa i mechanizmy SLAM}
-% Plan: Wyjaśnić tworzenie klatek kluczowych i punktów mapy, odzyskiwanie skojarzeń ORB, rozpoznawanie miejsca, relokalizację oraz dodawanie zweryfikowanych pętli do grafu. Źródła: slam/map.py, local_matching.py, place_recognition.py, pose_graph.py i stereo_pnp.py. Materiał: mapa 3D, graf pozy i przykładowa weryfikacja kandydata pętli.
-\label{sec:implementacja_slam}
+Układ świata $W$ jest inicjalizowany zgodnie z~położeniem lewej kamery w~pierwszym oknie. Jej początkowej pozie przypisywana jest macierz jednostkowa $\mathbf{T}_{W C_0}=\mathbf{I}$, a~dla obserwowanych punktów wyznaczane są początkowe współrzędne 3D. W~kolejnych oknach ruch kamery jest estymowany na podstawie korespondencji pomiędzy punktami 3D a~ich bieżącymi obserwacjami 2D. Najpierw wykorzystywane są punkty mapy lokalnej. Jeżeli estymacja względem mapy nie powiedzie się, system korzysta z~punktów wyznaczonych dla poprzedniej pary stereo.
 
-\subsection{Klatki kluczowe i punkty mapy}
-% Plan: Podać warunki tworzenia klatki kluczowej, wiązanie śladów z punktami mapy, lokalny zakres mapy i odrzucanie błędnych lub dalekich punktów. Źródła: map.py i odpowiednie fragmenty stereo_pnp.py. Materiał: diagram cyklu życia punktu mapy i wykres liczby aktywnych obserwacji.
-\label{subsec:klatki_landmarki}
+Rotacja i~translacja są wyznaczane wspólnie za pomocą iteracyjnej metody PnP dostępnej w~bibliotece OpenCV~\cite{opencv_calib3d}. Obliczenia odpowiadają modelowi projekcji opisanemu równaniem~\eqref{eq:pnp}. Algorytm RANSAC służy do odrzucania błędnych korespondencji na podstawie błędu reprojekcji~\cite{fischler1981ransac}. Metryczna skala translacji wynika z~głębokości punktów otrzymanej z~układu stereo~\cite{hartley2004multiple}.
 
-\subsection{Relokalizacja i domykanie pętli}
-% Plan: Rozdzielić ranking kandydatów od geometrycznej weryfikacji PnP, a następnie opisać warunki relokalizacji, krawędź pętli i korektę grafową. Źródła: place_recognition.py, pose_graph.py i stereo_pnp.py. Materiał: sekwencja kandydat--weryfikacja--korekta oraz diagnostyka liczby inlierów.
+Dodano również możliwość przyjęcia rotacji wyznaczonej przez całkowanie pomiarów żyroskopu. Estymacja nadal korzysta z~tych samych korespondencji 3D--2D i~modelu projekcji, jednak rotacja zostaje ustalona, dlatego wyznaczana jest tylko translacja. Wariant ten pozwala porównać dryf orientacji wynikający z~estymacji wizyjnej z~dryfem otrzymanym z~żyroskopu. Jego wadą jest bezpośrednie przenoszenie i~akumulowanie błędów pomiaru prędkości kątowej, w~szczególności błędu systematycznego żyroskopu~\cite{forster2015preintegration}.
+
+Niezależnie od źródła rotacji, do uruchomienia estymacji potrzeba co najmniej 15 korespondencji. Rozwiązanie musi zawierać co najmniej 15 inlierów, stanowiących nie mniej niż $25\%$ wszystkich korespondencji, a~mediana błędu reprojekcji nie może przekroczyć $2{,}5$ piksela. RANSAC wykonuje do 100 prób, z~progiem reprojekcji 3 piksele i~zadaną pewnością $0{,}999$. Odrzucane są również kroki większe niż $0{,}2\,\mathrm{m}$ lub $15^\circ$. W~wariancie pełnego PnP wynik wizyjny może być dodatkowo odrzucony, gdy różnica względem przyrostu z~żyroskopu przekracza $5^\circ$; kontrola ta nie zmienia konfiguracji końcowej, w~której rotacja jest bezpośrednio ustalana z~żyroskopu. Gdy dane inercyjne nie obejmują wymaganego przedziału czasu, system wyznacza pełną pozę za pomocą PnP.
+
+Zaakceptowane oszacowanie jest sprowadzane do transformacji $\mathbf{T}_{C_k C_{k-1}}$. Zgodnie z~konwencją określoną w~równaniu~\eqref{eq:frame_transform} aktualizacja pozy ma postać
+\begin{equation}
+    \mathbf{T}_{W C_k}
+    =
+    \mathbf{T}_{W C_{k-1}}
+    \mathbf{T}_{C_k C_{k-1}}^{-1}.
+    \label{eq:implementation_pose_update}
+\end{equation}
+Transformacja odwrotna jest potrzebna, ponieważ $\mathbf{T}_{C_k C_{k-1}}$ przekształca współrzędne z~poprzedniego układu kamery do bieżącego. Jeżeli nie uda się uzyskać poprawnego rozwiązania, zachowywana jest ostatnia pozycja, natomiast śledzenie punktów i~triangulacja są kontynuowane.
+
+\subsection{Klatki kluczowe i punkty mapy}\
+\label{subsec}
+
+Mapa ma strukturę opartą na klatkach kluczowych i~punktach 3D. Pierwsze przetworzone okno tworzy początkową klatkę kluczową, a~następna może zostać dodana po odstępie co najmniej pięciu okien. Nowa klatka powstaje, gdy obrót względem poprzedniej osiągnie $10^\circ$, udział aktywnych śladów powiązanych z~mapą spadnie poniżej $0{,}6$ albo stosunek przesunięcia kamery do mediany głębokości przekroczy $0{,}15$. Jeżeli żaden z~tych warunków nie zostanie wcześniej spełniony, klatka jest dodawana po 30 oknach. Podane wartości są parametrami przyjętymi w~opracowanym systemie. Dobrano je podczas testów rozwojowych, tak aby reagować na wyraźną zmianę widoku lub utratę punktów mapy, a~jednocześnie nie tworzyć nadmiarowych klatek kluczowych.
+
+Punkt mapy jest tworzony, gdy cecha zapisana w~klatce kluczowej ma poprawną głębokość stereo oraz deskryptor ORB~\cite{rublee2011orb}. Jego położenie zostaje przekształcone do układu świata zgodnie z~równaniem~\eqref{eq:frame_transform}. Jeżeli ten sam ślad wystąpi w~kolejnej klatce kluczowej, położenie punktu jest uśredniane z~nową obserwacją. Punkt zostaje potwierdzony po drugiej obserwacji, natomiast niepotwierdzone punkty są usuwane, gdy ich początkowa klatka nie należy już do pięciu ostatnich klatek kluczowych.
+
+Mapa lokalna zawiera punkty obserwowane w~pięciu ostatnich klatkach kluczowych. W~pierwszej kolejności wykorzystywane są zachowane powiązania śladów. Pozostałe cechy są dopasowywane na podstawie odległości Hamminga pomiędzy deskryptorami ORB. Dla odległości $d_1\leq d_2$ dwóch najlepszych kandydatów stosowany jest test ilorazowy Lowe'a~\cite{lowe2004distinctive}:
+\begin{equation}
+    d_1<\eta d_2,
+    \label{eq:implementation_descriptor_ratio}
+\end{equation}
+gdzie w~opracowanym systemie $\eta=0{,}75$. Dopasowanie jest przyjmowane tylko wtedy, gdy najlepszy kandydat jest lepszy od drugiego i~znajduje się dostatecznie blisko przewidywanej reprojekcji punktu. Każda cecha obrazu i~każdy punkt mapy mogą zostać wykorzystane tylko w~jednym dopasowaniu.
+
+Rysunek~\ref{fig:implementation_sparse_map} przedstawia mapę uzyskaną dla pełnej sekwencji \texttt{seq007\_test}. Czerwona linia łączy pozycje klatek kluczowych, natomiast kolor punktu oznacza liczbę jego obserwacji. Pełna mapa zawiera również pojedyncze punkty położone wyraźnie poza zasadniczą strukturą otoczenia, powstałe wskutek błędnych dopasowań lub triangulacji. Nie wpływają one bezpośrednio na estymowaną pozę: punkt jest wykorzystywany dopiero po dopasowaniu deskryptora, sprawdzeniu jego reprojekcji i~weryfikacji korespondencji przez RANSAC~\cite{fischler1981ransac}.
+
+\begin{figure}[!ht]
+    \centering
+    \begin{subfigure}[t]{0.49\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{implementation_evslam_seq007_sparse_map_side_view.png}
+        \caption{Widok przestrzenny.}
+        \label{fig:implementation_sparse_map_seq007_3d}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.49\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{implementation_evslam_seq007_sparse_map_top_view.png}
+        \caption{Rzut z~góry na płaszczyznę $X$-$Z$.}
+        \label{fig:implementation_sparse_map_seq007_topdown}
+    \end{subfigure}
+    \caption{Rzadka mapa uzyskana dla pełnej sekwencji \texttt{seq007\_test} -- robota poruszającego się po okręgach w zamkniętym pokoju. Czerwona linia przedstawia pozycje klatek kluczowych, a~kolor punktów oznacza liczbę ich obserwacji. Pokazano punkty utworzone w~odległości nie większej niż $5\,\mathrm{m}$ od kamery.}
+    \label{fig:implementation_sparse_map}
+\end{figure}
+
+
+\subsection{Rozpoznawanie miejsc i relokalizacja}
 \label{subsec:relocalizacja_petle}
 
-\section{Wyjścia, konfiguracja i diagnostyka}
-% Plan: Opisać runner, strukturę YAML, formaty trajektorii, mapy i prędkości oraz narzędzia diagnostyczne, bez przepisywania pełnych konfiguracji. Źródła: setup.py, io/result_io.py, scripts i configs. Materiał: tabela artefaktów wyjściowych i ich zastosowania.
+Obserwacja wykorzystywana do rozpoznawania miejsca jest tworzona niezależnie od punktów śledzonych podczas estymacji pozy. Z~reprezentacji zdarzeń powstaje obraz aktywności bez rozróżniania polaryzacji: bezwzględna różnica względem wartości neutralnej 127 jest podwajana i~ograniczana do 255, a~następnie poddawana filtracji medianowej $3\times3$. Na tak przygotowanym obrazie wyznaczane są cechy ORB oraz odpowiadające im głębokości stereo~\cite{rublee2011orb}. Równolegle obraz jest zmniejszany do $40\times24$ pikseli, centrowany i~normalizowany, tworząc uproszczoną sygnaturę całej obserwacji. Podział na szybkie wyszukiwanie podobnych klatek i~późniejszą weryfikację geometryczną jest wzorowany na ORB-SLAM2~\cite{murartal2017orbslam2}, wykorzystano jednak własną, prostszą sygnaturę obrazu.
+
+Iloczyn skalarny znormalizowanych sygnatur służy do wstępnego uporządkowania klatek kluczowych. Ich deskryptory ORB są następnie porównywane za pomocą odległości Hamminga i~testu ilorazowego z~równania~\eqref{eq:implementation_descriptor_ratio}. W~tym teście przyjęto $\eta=0{,}75$ dla EvSLAM i~$\eta=0{,}85$ dla M3ED. Do dalszej weryfikacji wymagane jest co najmniej 50 dopasowań, a~najwyżej trzy najlepsze klatki są sprawdzane metodą PnP z~algorytmem RANSAC~\cite{fischler1981ransac}. Transformacja jest sprawdzana w~obu kierunkach: z~punktów 3D kandydata do bieżących obserwacji 2D oraz z~bieżących punktów 3D do obserwacji zapisanych w~kandydacie.
+
+Dopasowanie zostaje zaakceptowane, gdy co najmniej jeden kierunek spełnia progi liczby i~udziału inlierów oraz ma medianę błędu reprojekcji nie większą niż 2 piksele. Dla EvSLAM wymagane jest co najmniej 25 inlierów i~udział równy przynajmniej $0{,}4$, natomiast dla M3ED odpowiednio 20 i~$0{,}3$. Łagodniejsze wartości przyjęto jednakowo dla wszystkich sekwencji M3ED, ponieważ wcześniejsze progi odrzucały poprawnych kandydatów przed utworzeniem krawędzi pętli. Pozostałe kryteria są wspólne dla obu zbiorów. Przebieg procesu przedstawiono na rysunku~\ref{fig:place_recognition_flow}.
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[height=0.35\textheight]{implementation_place_recognition_flow.png}
+    \caption{Wyszukiwanie i~weryfikacja wcześniej odwiedzonego miejsca. Zależnie od sytuacji poprawne dopasowanie służy do relokalizacji albo utworzenia krawędzi pętli.}
+    \label{fig:place_recognition_flow}
+\end{figure}
+
+Relokalizacja jest podejmowana po trzech kolejnych nieudanych próbach estymacji pozy i~obejmuje całą historię klatek kluczowych. Zaakceptowana transformacja pozwala wyznaczyć bieżącą pozę względem odnalezionej klatki. Podczas domykania pętli rozpoznawanie miejsca jest wykonywane po utworzeniu klatki kluczowej, z~pominięciem kandydatów zbyt bliskich w~kolejności przetwarzania. Potwierdzone dopasowanie tworzy krawędź pętli przekazywaną do optymalizacji grafu pozy.
+
+Przykład działania warstwy SLAM przedstawiono na rysunku~\ref{fig:implementation_slam_diagnostics_seq007}. Górny wykres pokazuje liczbę śledzonych i~aktywnych cech, korespondencji z~mapą oraz inlierów. Dolny wskazuje źródło pozy w~kolejnych oknach. Czerwone krzyżyki oznaczają okna, w~których powiązania aktywnych cech z~mapą lokalną zostały uzupełnione na podstawie deskryptorów ORB; nie oznaczają one relokalizacji. Gwiazdy wskazują zaakceptowane domknięcia pętli. W~przedstawionym przebiegu większość póz wyznaczono względem mapy lokalnej, zaakceptowano 15 pętli i~wykonano 4 relokalizacje. przez większość sekwencji pozycja była skutecznie wyznaczana względem mapy lokalnej, natomiast relokalizacja była potrzebna jedynie w~nielicznych momentach utraty śledzenia
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=\textwidth]{implementation_slam_diagnostics_seq007.png}
+    \caption{Diagnostyka śledzenia i~mechanizmów SLAM dla pełnej sekwencji \texttt{seq007}. Górny wykres przedstawia liczby cech, korespondencji z~mapą i~inlierów, natomiast dolny pokazuje źródło estymowanej pozy, dopasowania ORB do mapy lokalnej oraz zaakceptowane domknięcia pętli.}
+    \label{fig:implementation_slam_diagnostics_seq007}
+\end{figure}
+
+\subsection{Optymalizacja trajektorii}
+\label{subsec:optymalizacja_grafu_implementacja}
+
+Trajektoria składa się z póz robota w chwilach czasowych. Można je reprezentować jako graf. W celu ograniczenia rozmiaru grafu trajektorii, jego węzłami są pozy klatek kluczowych. Pomiędzy kolejnymi klatkami kluczowymi dodawane są krawędzie zawierające względną transformację wyznaczoną na podstawie bieżącej trajektorii. Krawędź pętli jest dodawana dopiero po wykryciu wcześniej odwiedzonego miejsca i~pozytywnym wyniku jego weryfikacji geometrycznej.
+
+Błąd każdej krawędzi jest wyznaczany zgodnie z~równaniem~\eqref{eq:pose_graph_error}. W~implementacji nie jest przechowywana osobna pełna macierz informacji $\boldsymbol{\Omega}_{ij}$ dla każdej krawędzi. Zamiast tego składowe błędu są skalowane za pomocą wspólnych wag translacji i~rotacji:
+\begin{equation}
+    \mathbf{r}_{ij}
+    =
+    \mathbf{w}\odot\mathbf{e}_{ij},
+    \qquad
+    \mathbf{w}
+    =
+    (w_t,w_t,w_t,w_R,w_R,w_R)^T,
+    \label{eq:implementation_pose_graph_residual}
+\end{equation}
+gdzie $w_t$ i~$w_R$ określają odpowiednio wagi składowych translacyjnych i~rotacyjnych, a~$\odot$ oznacza mnożenie odpowiadających sobie składowych.
+
+Optymalizacja jest realizowana za pomocą funkcji \texttt{scipy.optimize.least\_squares}. Do każdej składowej wektora $\mathbf{r}_{ij}$ stosowana jest funkcja Hubera~\cite{huber1964robust}, ograniczająca wpływ dużych reszt. Jej próg określa parametr \texttt{huber\_scale}, którego wartość domyślna wynosi $1$. Pierwsza poza grafu pozostaje stała.
+
+Po zaakceptowaniu pętli jej krawędź jest dodawana do grafu, a optymalizacja jest uruchamiana. Po jej poprawnym zakończeniu aktualizowane są pozy klatek kluczowych i~położenia punktów mapy, a~zapisane pozy klatek pośrednich są ponownie wyznaczane względem skorygowanych klatek kluczowych.
+
+Zmiennymi optymalizacji są wyłącznie pozy klatek kluczowych. Położenia punktów 3D i~ich obserwacje 2D nie są optymalizowane wspólnie z~pozami, dlatego zastosowany mechanizm nie jest optymalizacją wiązki.
+
+\section{Wyznaczanie wyników końcowych}
 \label{sec:implementacja_wyjscia}
+
+Podstawowym wynikiem działania systemu jest trajektoria lewej kamery zapisana jako pozy $\mathbf{T}_{W C_k}$. W~przypadku EvSLAM wymagane jest również wyznaczenie prędkości liniowej kamery, natomiast format wynikowy M3ED zawiera wyłącznie pozycję i~orientację.
+Prędkość dla EvSLAM jest obliczana na podstawie wyznaczonej trajektorii. W~otoczeniu każdej chwili $t_i$ do kolejnych współrzędnych pozycji kamery w~układzie świata dopasowywany jest lokalny wielomian, a~jego pochodna w~punkcie $t_i$ stanowi oszacowanie prędkości~\cite{savitzky1964smoothing}. W~konfiguracji końcowej stosowany jest wielomian stopnia 2 i~okno 41 próbek.
+
+Dla wielomianu drugiego stopnia zależność ta przyjmuje postać:
+\begin{equation}
+    \mathbf{p}_W(t_i+\Delta t)
+    \approx
+    \mathbf{a}_0
+    +
+    \mathbf{a}_1\Delta t
+    +
+    \mathbf{a}_2\Delta t^2,
+    \qquad
+    \mathbf{v}_W(t_i)=\mathbf{a}_1,
+    \qquad
+    \mathbf{v}_{C_k}
+    =
+    \mathbf{R}_{W C_k}^{T}\mathbf{v}_W,
+    \label{eq:implementation_velocity}
+\end{equation}
+gdzie $\mathbf{p}_W$ jest pozycją kamery, $\Delta t$ przesunięciem czasu względem $t_i$, a~$\mathbf{a}_0$, $\mathbf{a}_1$ i~$\mathbf{a}_2$ współczynnikami dopasowanego wielomianu. Ostatnia zależność przekształca wyznaczoną prędkość z~układu świata do układu bieżącej kamery.
+
+Przed utworzeniem pliku wynikowego trajektoria jest interpolowana do znaczników czasu wymaganych przez dany konkurs. Następnie prędkość jest wyznaczana na podstawie tak otrzymanej trajektorii i~zapisywana w~układzie kamery.
+Zastosowanie takiego lokalnego dopasowania wielomianowego pozwala ograniczyć wzmacnianie niewielkich zmian i szumu trajektorii podczas numerycznego różniczkowania, bez rozszerzania estymatora SLAM o dodatkowy stan prędkości.

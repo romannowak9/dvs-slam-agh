@@ -1,185 +1,141 @@
-# Scripts usage
+# Script usage
 
-Verification scripts use the existing project YAML for dataset and algorithm
-settings. Parameters already present in YAML, such as event topics, processing
-range, aggregation, BAF, rectification, tracker, stereo depth, PnP, IMU and
-`output.output_dir`, are not repeated in the command line.
+Run commands from the `event-slam` directory. The Docker environment described
+in the repository `README.md` is the supported runtime.
 
-Options used only by a particular diagnostic remain CLI arguments. Use
-`--help` to list them. The default configuration is
-`configs/evslam_seq007_test_slam.yaml`; pass another one with `--config`.
+## Complete experiments
 
-## Dataset and event processing
+These are the normal entry points for any correctly configured sequence:
 
 ```bash
-python3 scripts/verification/inspect_bag.py \
-  --config configs/evslam_seq007_test_slam.yaml \
-  --inspect-imu
-
-python3 scripts/verification/debug_event_windows.py \
-  --config configs/evslam_seq007_test_slam.yaml \
-  --num-windows 10
-
-python3 scripts/verification/debug_event_frames.py \
-  --config configs/evslam_seq007_test_slam.yaml \
-  --save-preview
-
-python3 scripts/verification/compare_sensors.py \
-  --config configs/evslam_seq007_test_slam.yaml \
-  --only-color
+./scripts/run_evslam.sh configs/my_evslam.yaml
+./scripts/run_m3ed.sh configs/my_m3ed.yaml
 ```
 
-`height`, `width`, camera topics used only for sensor comparison, display
-options and inspection limits remain optional arguments.
-
-## Calibration, rectification and IMU
+Without an argument they use `configs/evslam.yaml` and `configs/m3ed.yaml`.
+Dataset, reference, optional ground-truth and output paths are defined in YAML.
+If ground truth is configured, the scripts also align to the first pose, create
+plots and compute metrics. A ground-truth path passed as the second argument
+overrides the value in YAML:
 
 ```bash
-python3 scripts/verification/debug_calibration.py \
-  --config configs/evslam_seq007_test_slam.yaml
-
-python3 scripts/verification/debug_rectification.py \
-  --config configs/evslam_seq007_test_slam.yaml \
-  --draw-lines
-
-python3 scripts/verification/debug_imu_motion_compensation.py \
-  --config configs/evslam_seq007_test_slam.yaml \
-  --save-preview
-
-python3 scripts/verification/debug_imu_rotation.py \
-  --config configs/evslam_seq007_test_slam.yaml \
-  --estimate outputs/example/result_seq007.txt \
-  --csv outputs/example/imu_rotation_debug.csv
+./scripts/run_evslam.sh configs/my_evslam.yaml /data/evSLAM/gt/my_gt.txt
+./scripts/run_m3ed.sh configs/my_m3ed.yaml /data/m3ed/gt/my_gt.txt
 ```
 
-The diagnostic-only `extra-timeshift`, preview and display settings remain
-arguments.
+When no ground truth is available, set `evaluation.ground_truth_path: null`.
+The internal `config_run_paths.py` helper resolves output filenames for the
+shell runners and is not normally called directly.
 
-## Tracking, depth and pose estimation
+## Pipeline runner
+
+Use the Python runner directly when working with a copied or modified config:
 
 ```bash
-python3 scripts/verification/debug_feature_tracking.py \
-  --config configs/evslam_seq007_test_slam.yaml
-
-python3 scripts/verification/debug_stereo_depth.py \
-  --config configs/evslam_seq007_test_slam.yaml \
-  --max-draw-matches 200
-
-python3 scripts/verification/run_stereo_pnp_vo.py \
-  --config configs/evslam_seq007_test_vo.yaml \
-  --save-debug
+python3 scripts/run_event_slam.py --config configs/evslam.yaml
+python3 scripts/run_event_slam.py --config configs/m3ed.yaml
 ```
 
-## SLAM map
+The dataset reader is selected by `dataset.format`. A missing format means an
+EvSLAM ROS bag; `m3ed_h5` selects the M3ED reader. All algorithm parameters and
+output paths come from YAML.
 
-Run SLAM and save keyframe images plus map diagnostics:
+## Alignment, plots and metrics
 
-```bash
-python3 scripts/verification/debug_slam_map.py \
-  --config configs/evslam_seq007_test_slam.yaml \
-  --max-plot-distance 5
-```
+The final shell scripts contain the canonical commands. The tools can also be
+called separately.
 
-Create only `map_3d.png` and `tracking_diagnostics.png` from saved CSV files:
-
-```bash
-python3 scripts/verification/plot_slam_map_results.py \
-  outputs/m3ed_falcon_indoor_flight_1_slam_loop_fix_try2
-```
-
-## Result analysis
-
-These parameters are not part of the algorithm YAML and therefore remain CLI
-arguments:
+EvSLAM:
 
 ```bash
 python3 scripts/align_evslam_result_to_gt.py \
-  --estimate outputs/evslam_seq007_slam_imu_rot/result_seq007.txt \
-  --gt /data/evSLAM/gt/seq007_test_gt.txt \
-  --output outputs/evslam_seq007_slam_imu_rot/result_seq007_first_pose.txt \
+  --estimate <output_dir>/<raw_result>.txt \
+  --gt /data/evSLAM/gt/<ground_truth>.txt \
+  --output <output_dir>/result_aligned_first_pose.txt \
   --method first_pose
 
 python3 scripts/plot_trajectory.py \
-  --trajectory outputs/evslam_seq007_slam_imu_rot/result_seq007_first_pose.txt \
-  --gt /data/evSLAM/gt/seq007_test_gt.txt \
-  --output-dir outputs/evslam_seq007_slam_imu_rot/plots
+  --trajectory <output_dir>/result_aligned_first_pose.txt \
+  --gt /data/evSLAM/gt/<ground_truth>.txt \
+  --output-dir <output_dir>/plots_first_pose \
+  --prefix <sequence>_first_pose
 
 python3 scripts/evaluate_evslam_metrics.py \
-  --estimate outputs/example/result_seq007_aligned_se3.txt \
-  --gt /data/evSLAM/gt/seq007_test_gt.txt \
-  --output outputs/example/metrics.txt
+  --estimate <output_dir>/result_aligned_first_pose.txt \
+  --gt /data/evSLAM/gt/<ground_truth>.txt \
+  --output <output_dir>/metrics_first_pose.txt \
+  --alignment none
 ```
 
-The EvSLAM report contains the challenge metrics (mean ATE and speed-weighted
-RVE AUC), position RMSE and fixed-time-delta translational/rotational RPE.
-RPE uses a 1 s interval by default; change it with `--rpe-delta-seconds`.
-
-M3ED uses separate analysis scripts because its challenge files contain poses
-only (`timestamp tx ty tz qx qy qz qw`). The plotting script derives smoothed
-camera-frame velocities from both estimated and GT poses. It displays both
-trajectories directly in the official M3ED camera frame, without reordering
-axes. M3ED positions describe the camera in the initial-camera frame, while the
-published quaternion represents the inverse rotation; the M3ED scripts perform
-this conversion at the file boundary and use project-standard `T_W_C`
-internally.
+M3ED:
 
 ```bash
 python3 scripts/align_m3ed_result_to_gt.py \
-  --estimate outputs/example/falcon_outdoor_day_fast_flight_2.txt \
-  --gt /data/m3ed/gt/falcon_outdoor_day_fast_flight_2_pose_evo_gt.txt \
-  --output outputs/example/result_aligned_se3.txt \
-  --method se3
+  --estimate <output_dir>/<sequence>.txt \
+  --gt /data/m3ed/gt/<ground_truth>.txt \
+  --output <output_dir>/result_aligned_first_pose.txt \
+  --method first_pose
 
 python3 scripts/plot_m3ed_trajectory.py \
-  --trajectory outputs/m3ed_falcon_indoor_flight_1_slam_loop_fix/falcon_indoor_flight_1.txt \
-  --gt /data/m3ed/gt/falcon_indoor_flight_1_pose_evo_gt.txt \
-  --output-dir outputs/m3ed_falcon_indoor_flight_1_slam_loop_fix/plots
+  --trajectory <output_dir>/result_aligned_first_pose.txt \
+  --gt /data/m3ed/gt/<ground_truth>.txt \
+  --output-dir <output_dir>/plots_first_pose \
+  --prefix <sequence>_first_pose
 
 python3 scripts/evaluate_m3ed_metrics.py \
-  --estimate outputs/m3ed_falcon_indoor_flight_1_slam_try3/falcon_indoor_flight_1.txt \
-  --gt /data/m3ed/gt/falcon_indoor_flight_1_pose_evo_gt.txt \
-  --output outputs/m3ed_falcon_indoor_flight_1_slam_try3/metrics_se3.txt
+  --estimate <output_dir>/result_aligned_first_pose.txt \
+  --gt /data/m3ed/gt/<ground_truth>.txt \
+  --output <output_dir>/metrics_first_pose.txt
 ```
 
-The M3ED evaluator expects a trajectory already aligned with the selected
-`first_pose`, SE(3) or Sim(3) protocol. It reports translational APE,
-orientation error and fixed-time-delta RPE (1 s by default).
+`trajectory_metrics.py` contains shared metric functions and is imported by the
+evaluators; it is not a command-line program.
 
-## Main SLAM runner
+## M3ED challenge package
 
-```bash
-python3 scripts/run_event_slam.py \
-  --config configs/evslam_seq007_test_slam.yaml
-```
-
-The same runner selects M3ED from `dataset.format: m3ed_h5`:
-
-```bash
-python3 scripts/run_event_slam.py \
-  --config configs/m3ed_falcon_fast_flight_2_slam.yaml
-```
-
-An interrupted M3ED run still saves the trajectory, map diagnostics and a
-partial `<sequence_name>.txt`. The partial challenge file contains only the
-reference timestamps covered by the trajectory; a completed run remains strict
-and must cover every reference timestamp.
-
-M3ED requires the system package `python3-h5py` documented in
-`StartInstruction.md`.
-
-Inspect reader throughput without running SLAM:
-
-```bash
-python3 scripts/verification/inspect_m3ed_h5.py
-```
-
-Validate and package the three official challenge files:
+For the three hidden challenge sequences, validate the result timestamps and
+create the submission archive with:
 
 ```bash
 python3 scripts/package_m3ed_submission.py \
   outputs/m3ed_challenge outputs/m3ed_submission.zip
 ```
 
-Debug images are written below `output.output_dir` from the selected YAML. Use
-a copied configuration with a different output directory when you want to keep
-them separate from the main run.
+Use `--reference-dir` if the timestamp files are not in `/data/m3ed/ref`.
+
+## Diagnostic scripts
+
+Diagnostic commands read a YAML config through `--config`. Use `--help` on a
+specific script for optional preview limits and output switches.
+
+Dataset inspection and event frames:
+
+```bash
+python3 scripts/verification/inspect_bag.py --config configs/evslam.yaml --inspect-imu
+python3 scripts/verification/inspect_m3ed_h5.py
+python3 scripts/verification/debug_event_windows.py --config configs/evslam.yaml --num-windows 10
+python3 scripts/verification/debug_event_frames.py --config configs/evslam.yaml --save-preview
+python3 scripts/verification/compare_sensors.py --config configs/evslam.yaml --only-color
+```
+
+Calibration and IMU:
+
+```bash
+python3 scripts/verification/debug_calibration.py --config configs/evslam.yaml
+python3 scripts/verification/debug_rectification.py --config configs/evslam.yaml --draw-lines
+python3 scripts/verification/debug_imu_motion_compensation.py --config configs/evslam.yaml --save-preview
+python3 scripts/verification/debug_imu_rotation.py --config configs/my_evslam.yaml --estimate <result.txt> --csv <imu_debug.csv>
+```
+
+Tracking, stereo depth and mapping:
+
+```bash
+python3 scripts/verification/debug_feature_tracking.py --config configs/evslam.yaml
+python3 scripts/verification/debug_stereo_depth.py --config configs/evslam.yaml --max-draw-matches 200
+python3 scripts/verification/run_stereo_pnp_vo.py --config configs/evslam.yaml --save-debug
+python3 scripts/verification/debug_slam_map.py --config configs/evslam.yaml --max-plot-distance 5
+python3 scripts/verification/plot_slam_map_results.py outputs/evslam
+```
+
+`verification_config.py` is a shared helper imported by the diagnostic scripts;
+it is not a command-line program.

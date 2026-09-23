@@ -1,14 +1,23 @@
 \begin{abstractpage}
 \begin{abstract}{polish}
 
-% Plan: Uzupełnić po zakończeniu pracy krótkim opisem problemu, wykorzystanych danych i sensorów, opracowanego systemu oraz najważniejszych wyników liczbowych i ograniczeń.
+Kamery zdarzeniowe rejestrują lokalne zmiany jasności z~wysoką rozdzielczością czasową i~dużą rozpiętością tonalną, dzięki czemu są szczególnie przydatne podczas szybkiego ruchu oraz w~trudnych warunkach oświetleniowych. W~niniejszej pracy zaprezentowano system jednoczesnej lokalizacji i~mapowania (SLAM), wyznaczający trajektorię na podstawie danych z~pary kamer zdarzeniowych w~układzie stereo. Zdarzenia są synchronizowane i~agregowane do wykładniczo zanikających reprezentacji obrazowych. Punkty wykrywane metodą GFTT są śledzone metodą Lucas--Kanade, a~ich głębokość jest wyznaczana przez triangulację stereo. Poza jest estymowane przez PnP z~algorytmem RANSAC.  System korzysta z~danych z~żyroskopu, aby kompensować rozmycie wynikające z~ruchu obrotowego oraz wyznaczać zmianę orientacji. W~celu ograniczania dryfu, poza jest estymowana względem punktów rzadkiej mapy tworzonej z~klatek kluczowych, a~rozpoznawanie miejsc umożliwia domykanie pętli i~optymalizację grafu trajektorii. System oceniono na danych ze zbiorów EvSLAM~\cite{evslam2025challenge} i~M3ED~\cite{m3ed2025challenge}, o~rozdzielczościach odpowiednio $640\times480$ i~$1280\times720$ pikseli. Dla siedmiu sekwencji EvSLAM uzyskano sumę ATE równą $3{,}654\,\mathrm{m}$ i~sumę AUC równą $4{,}996$, wobec $0{,}817\,\mathrm{m}$ i~$6{,}286$ dla zwycięskiego rozwiązania. Dla sekwencji M3ED z~dostępną trajektorią referencyjną wyniki różnią się w zależności od charakterystyki sekwencji -- dla dwóch badanych wyniosło odpowiednio $0{,}162\,\mathrm{m}$ i~$25{,}305\,\mathrm{m}$.
 
 \end{abstract}
+
+\noindent\textbf{Słowa kluczowe:} kamery zdarzeniowe, stereowizja, jednoczesna lokalizacja i~mapowanie, odometria wizyjna, estymacja pozy
+
+\end{abstractpage}
 
 % \newpage
 
+\begin{abstractpage}
 \begin{abstract}{english}
 
-% Plan: Przygotować wierne znaczeniowo angielskie tłumaczenie ostatecznego streszczenia polskiego, z zachowaniem terminologii użytej w tytule i pracy.
+Event cameras register local brightness changes with high temporal resolution and a~wide dynamic range, making them particularly useful during rapid motion and under challenging illumination. This thesis presents a~simultaneous localization and mapping (SLAM) system that estimates a~trajectory from a~stereo pair of event cameras. Events are synchronized and aggregated into exponentially decaying image representations. Points detected with GFTT are tracked using the Lucas--Kanade method, and their depth is recovered through stereo triangulation. The resulting 3D--2D correspondences are used for PnP estimation with RANSAC. The system uses gyroscope measurements to~compensate for the smearing of~structures caused by rotational motion and to determine orientation changes. To reduce drift, the pose is estimated relative to a~sparse map constructed from keyframes, while place recognition enables loop closure and pose graph optimization. The system was evaluated on data from the EvSLAM~\cite{evslam2025challenge} and M3ED~\cite{m3ed2025challenge} datasets, with resolutions of~$640\times480$ and $1280\times720$ pixels, respectively. Across seven EvSLAM sequences, the system obtained a~total ATE of~$3.654\,\mathrm{m}$ and a~total AUC of~$4.996$, compared with $0.817\,\mathrm{m}$ and $6.286$ for the winning entry. For the M3ED sequences with available ground truth, the results varied depending on the sequence characteristics: the ATE values for the two evaluated sequences were $0.162\,\mathrm{m}$ and $25.305\,\mathrm{m}$, respectively.
+
 \end{abstract}
+
+\noindent\textbf{Keywords:} event cameras, stereo vision, simultaneous localization and mapping, SLAM, visual odometry, VO, pose estimation
+
 \end{abstractpage}

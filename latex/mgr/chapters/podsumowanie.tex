@@ -1,15 +1,22 @@
 \chapter{Podsumowanie}
-% Plan: Zestawić osiągnięcia z celem pracy, sformułować wnioski poparte wynikami i wskazać realistyczne kierunki rozwoju. Źródła: rozdziały implementacyjne i wyniki, bez wprowadzania nowych twierdzeń. Materiał: krótka tabela cel--rezultat--dowód.
 \label{cha:podsumowanie}
 
-\section{Realizacja celu pracy}
-% Plan: Podsumować wykonany system, obsługiwane dane, estymowane wielkości i elementy SLAM-u, wyraźnie wskazując cele częściowe i niezrealizowane. Źródła: kod, konfiguracje i wyniki końcowe. Materiał: tabela stopnia realizacji celów.
-\label{sec:realizacja_celu}
+% \section{Realizacja celu pracy}
+% \label{sec:realizacja_celu}
 
-\section{Wnioski}
-% Plan: Zebrać najważniejsze wnioski ilościowe o dokładności, stabilności i wpływie sensorów lub parametrów, każdy wraz z warunkami eksperymentu. Źródła: zatwierdzone tabele i wykresy z rozdziału wynikowego. Materiał: bez nowych wykresów, ewentualnie syntetyczna tabela.
-\label{sec:wnioski}
+Celem pracy było opracowanie systemu wyznaczającego ruch robota na podstawie danych z~dwóch kamer zdarzeniowych, przeznaczonego do przetwarzania zbiorów EvSLAM i~M3ED. Cel ten został zrealizowany. Powstał system zawierający moduły odpowiedzialne za synchronizację i~przygotowanie zdarzeń, śledzenie punktów, geometrię stereo oraz estymację trajektorii lewej kamery. Dla EvSLAM wyznaczana jest również wymagana przez konkurs prędkość liniowa.
+
+Odometria wizyjna została rozszerzona o~rzadką mapę, lokalizację względem jej punktów, relokalizację, domykanie pętli i~optymalizację grafu pozy. System przetworzył wszystkie oceniane sekwencje EvSLAM oraz wybrane pełne przebiegi M3ED. Działa on na gotowych, zebranych wcześniej sekwencjach i~obecnie nie jest przystosowany do pracy w~czasie rzeczywistym na robocie mobilnym. Wykorzystuje IMU, lecz używa wyłącznie żyroskopu, dlatego nie stanowi pełnego estymatora wizyjno-inercyjnego. Prędkość oblicza z~gotowej trajektorii położenia, co jest prostym rozwiązaniem stosowanym na potrzeby uzyskania wyników wymaganych przez EvSLAM.
 
 \section{Kierunki dalszych prac}
-% Plan: Omówić pełne VIO z biasami i preintegracją, bundle adjustment, lepsze rozpoznawanie miejsc, optymalizację wydajności i testy online jako przyszłe rozszerzenia. Źródła: ograniczenia kodu oraz OKVIS, VINS-Mono, ORB-SLAM3 i literatura eventowego VIO. Materiał: tabela kierunek--oczekiwany efekt--wymagana walidacja.
 \label{sec:dalsze_prace}
+
+Najważniejsze kierunki rozwoju, w~kolejności wynikającej z~wykazanych ograniczeń, obejmują:
+
+\begin{enumerate}
+    \item utworzenie pełnego estymatora wizyjno-inercyjnego, który wspólnie wyznaczałby pozę, prędkość oraz błędy systematyczne IMU z~wykorzystaniem preintegracji pomiarów~\cite{forster2015preintegration} -- mogłoby to ograniczyć dryf rotacji, będący jednym z~najważniejszych ograniczeń widocznych w~wynikach dla sekwencji \texttt{falcon\_outdoor\_day\_fast\_flight\_2};
+    \item uwzględnienie niepewności estymacji głębi podczas wyboru punktów do estymacji pozy;
+    \item wprowadzenie adaptacyjnego doboru czasu akumulacji zależnego od dynamiki sceny, który zwiększyłby odporność systemu na zmiany prędkości ruchu robota i~pozwoliłby skutecznie estymować pozę z~większej liczby klatek zdarzeniowych;
+    \item dodanie lokalnej optymalizacji wiązki (ang. \textit{bundle adjustment}), stosowanej w~bardziej rozbudowanych systemach SLAM, między innymi w~ORB-SLAM2~\cite{murartal2017orbslam2}, oraz zastosowanie bardziej wydajnego optymalizatora grafowego dla większych map~\cite{grisetti2010graph};
+    \item ocena złożoności obliczeniowej i~przyspieszenie najbardziej kosztownych etapów, a~następnie sprawdzenie systemu na bieżącym strumieniu danych.
+\end{enumerate}

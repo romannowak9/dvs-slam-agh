@@ -1,23 +1,159 @@
 \chapter{Metodyka badań}
-% Plan: Zdefiniować powtarzalny protokół eksperymentów, wybór danych, konfiguracji, wyrównania i metryk przed prezentacją wyników. Źródła: oficjalne materiały EvSLAM i M3ED, skrypty ewaluacji oraz zapisane run_config.yaml. Materiał: tabela kompletnego planu eksperymentów.
 \label{cha:metodyka_badan}
 
-\section{Zbiory danych i sekwencje testowe}
-% Plan: Opisać sensory, formaty, ground truth i wybrane sekwencje EvSLAM oraz M3ED, uzasadniając ich dobór i zakres czasowy. Źródła: oficjalne strony i dokumentacje zbiorów, readery oraz konfiguracje. Materiał: tabela sekwencji z czasem, platformą i użytymi sensorami.
+Celem badań była ocena dokładności opracowanego systemu oraz sprawdzenie wpływu jego najważniejszych parametrów na wynik. Ich zadaniem jest weryfikacja:
+\begin{itemize}
+    \item jaki efekt daje wykorzystanie mapy, relokalizacji i~domykania pętli względem odometrii wizyjnej, opartej wyłącznie na estymacji zmiany położenia między kolejnymi klatkami zdarzeniowymi. Pozwala to przedstawić różnicę między VO a~SLAM i~ocenić korzyść z~zastosowania mechanizmów SLAM;
+    \item czy zastosowanie filtracji BAF poprawia wynik dla sekwencji badanych zbiorów i~jak zwiększa koszt obliczeniowy algorytmu;
+    \item jak zmienia się estymacja po zastąpieniu rotacji wyznaczanej metodą PnP rotacją otrzymaną bezpośrednio z~żyroskopu;
+    \item jaki wpływ na wynik ma czas akumulacji zdarzeń;
+    \item jaką jakość osiąga konfiguracja końcowa na sekwencjach EvSLAM i~M3ED.
+\end{itemize}
+Każde porównanie kontrolowane dotyczy jednego zdefiniowanego wariantu systemu, a~pozostałe ustawienia pozostają niezmienione.
+
+\section{Zbiory danych i zakres badań}
 \label{sec:zbiory_danych}
 
-\section{Konfiguracje porównawcze}
-% Plan: Zdefiniować bazowe VO i pełny SLAM oraz warianty stereo, BAF, kompensacji ruchu i prioru rotacji; każdą próbę powiązać z konkretnym configiem. Źródła: configs i run_config.yaml wybranych wyników. Materiał: macierz eksperymentów sensor--moduł--parametry.
+W~badaniach wykorzystano zbiory EvSLAM i~M3ED opisane w~rozdziale~\ref{cha:projekt_systemu}.
+Sekwencje EvSLAM obejmują ruch drona, platformy liniowej, ramienia robota i~robota kołowego.
+Dla M3ED wybrano jedną sekwencję testową przeznaczoną do ewaluacji konkursu \cite{m3ed2025challenge} -- \path{spot_outdoor_day_penno_building_loop} oraz dwie sekwencje ze zbioru \cite{m3ed2025data}, nie brane pod uwagę przy ocenie wyników konkursu, lecz zawierające dane referencyjne (ang. \textit{ground truth}), umożliwiające ocenę jakości. Pierwszą z nich jest \path{falcon_outdoor_day_fast_flight_2} -- specjalnie wybrana jako trudny test możliwości algorytmu, mogącego wykraczać poza jego możliwości. Jest to szybki lot drona nad terenem zawierającym niewiele punktów odniesienia, znajdujących się daleko od kamer, co utrudnia poprawne oszacowanie głębi. Dodatkowym wyzwaniem jest to, że dron w~tej sekwencji wraca w~to samo miejsce tylko raz -- w~momencie lądowania. Kolejna sekwencja jest potencjalnie łatwiejsza -- jest to lot drona w~zamkniętym pomieszczeniu, pełnym charakterystycznych obiektów -- \path{falcon_indoor_flight_1}. W~tabeli użyto krótszych nazw odpowiadających sekwencjom.
+
+Zestawienie użytych danych przedstawiono w~tabeli~\ref{tab:badane_sekwencje}.
+\begin{table}[!ht]
+    \centering
+    \small
+    \caption{Sekwencje wykorzystane w~badaniach.}
+    \label{tab:badane_sekwencje}
+    \begin{tabularx}{\textwidth}{
+        >{\raggedright\arraybackslash}p{0.09\textwidth}
+        >{\raggedright\arraybackslash}p{0.20\textwidth}
+        >{\raggedright\arraybackslash}p{0.11\textwidth}
+        >{\raggedright\arraybackslash}X
+        >{\raggedright\arraybackslash}p{0.11\textwidth}
+    }
+        \toprule
+        Zbiór & Sekwencja & Czas trwania & Platforma i~scenariusz & Referencja \\
+        \midrule
+        EvSLAM & \texttt{seq001} & 41,0~s & dron, spokojny ruch po owalnym torze & dostępna \\
+        EvSLAM & \texttt{seq002} & 38,9~s & dron, szybszy ruch po owalnym torze & dostępna \\
+        EvSLAM & \texttt{seq003} & 41,2~s & dron, spokojny ruch z~dominującymi odcinkami prostymi & dostępna \\
+        EvSLAM & \texttt{seq004} & 33,4~s & dron, szybszy ruch z~dominującymi odcinkami prostymi & dostępna \\
+        EvSLAM & \texttt{seq005} & 12,8~s & platforma liniowa, ruch po prowadnicy & dostępna \\
+        EvSLAM & \texttt{seq006} & 26,8~s & ramię robota, krótkie i~gwałtowne ruchy kamery & dostępna \\
+        EvSLAM & \texttt{seq007} & 35,9~s & robot kołowy, jazda po okręgu & dostępna \\
+        EvSLAM & \texttt{seq007\_test} & 32,5~s & robot kołowy, jazda po okręgu, sekwencja niebrana pod uwagę w~wyniku końcowym, przeznaczona do~testów algorytmu & dostępna \\
+        \midrule
+        M3ED & \texttt{fast\_flight\_2} & 163~s & dron, szybki lot na zewnątrz w~dzień & dostępna \\
+        M3ED & \texttt{indoor\_flight\_1} & 56,9~s & dron, lot między przeszkodami wewnątrz budynku & dostępna \\
+        M3ED & \texttt{spot\_loop} & 295,9~s & robot kroczący, zewnętrzna trasa z~powrotem w~okolice początku & niedostępna \\
+        \bottomrule
+    \end{tabularx}
+\end{table}
+
+\section{Konfiguracja eksperymentów}
 \label{sec:konfiguracje_badan}
 
-\section{Metryki i wyrównanie trajektorii}
-% Plan: Zdefiniować ATE lub APE, RMSE, RPE i metrykę prędkości EvSLAM, wyraźnie rozdzielając first_pose od pomocniczych SE(3) i Sim(3). Źródła: oficjalne protokoły konkursów, evo i scripts/trajectory_metrics.py. Materiał: tabela metryk z jednostką, wyrównaniem i interwałem RPE.
-\label{sec:metryki}
+Dla sekwencji zbioru EvSLAM stosuje się okna agregacji zdarzeń o~długości $t=12\,\mathrm{ms}$, natomiast dla M3ED $t=24\,\mathrm{ms}$. W~obu zbiorach wykorzystuje się wykładniczo zanikające klatki zdarzeniowe ze stałą zaniku $\tau=t$, kompensację obrotu do środka okna, detektor cech GFTT i~rotację z~żyroskopu. Stosowane są również te same kryteria PnP, wyboru klatek kluczowych oraz optymalizacji grafu. Geometria stereo jest przetwarzana w~ten sam sposób, z~kalibracją właściwą dla danego zestawu kamer. BAF jest włączony dla EvSLAM, a~wyłączony dla M3ED. Maksymalna głębokość stereo wynosi odpowiednio $10\,\mathrm{m}$ i~$100\,\mathrm{m}$.
 
-\section{Badanie wpływu parametrów}
-% Plan: Zaplanować kontrolowane porównania długości okna, stałej agregacji, filtracji, progów stereo i kryteriów klatek kluczowych, zmieniając jedną grupę parametrów naraz. Źródła: konfiguracje, kod modułów i literatura reprezentacji zdarzeń. Materiał: tabela zakresów parametrów oraz wykresy dokładność--stabilność--czas.
-\label{sec:badanie_parametrow}
+W~rozpoznawaniu pętli M3ED zastosowano łagodniejsze progi odpowiedzialne za wykrywanie ponownie odwiedzonego miejsca.
+Różnice w~parametrach wynikają z~odmiennych charakterystyk zbiorów. M3ED zawiera znacznie dłuższe sekwencje, często rejestrowane na zewnątrz, w~których obiekty znajdują się dalej od kamer, a~robot przebywa większe dystanse i~rzadziej wraca w~to samo miejsce. Z~tego powodu zwiększono czułość wykrywania pętli dla M3ED w~porównaniu z~EvSLAM.
+Parametry zostały dobrane eksperymentalnie na podstawie wyników opisanych w~sekcji~\ref{sec:wyniki_eksperymenty} oraz testów rozwojowych.
 
-\section{Powtarzalność i pomiar czasu}
-% Plan: Opisać środowisko, komendę uruchomienia, wersję kodu, kompletność przebiegu i pomiar czasu offline; nie wnioskować o pracy w czasie rzeczywistym bez osobnego testu. Źródła: run_event_slam.py, ScriptsUsage.md i logi wybranych wyników. Materiał: tabela środowiska oraz czasu readera i pipeline'u.
-\label{sec:powtarzalnosc}
+\section{Ocena jakości estymowanej trajektorii}
+\label{sec:protokol_oceny}
+
+\subsection{Wyrównanie trajektorii}
+\label{subsec:wyrownanie}
+
+Próbki estymowane są wyrównywane czasowo z~referencyjnymi. W~oficjalnym protokole EvSLAM pozycje są wyrównywane metodą Umeyamy bez estymacji skali, czyli za pomocą transformacji $SE(3)$. Wyznaczane są globalny obrót i~translacja, natomiast przyjmuje się skalę równą $1$. Tak wyrównane pozycje służą do obliczenia ATE. Wartość AUC jest wyznaczana bezpośrednio z~dopasowanych w~czasie prędkości zapisanych w~układzie kamery~\cite{evslam2026evaluation,zhong2026evslam}.
+
+M3ED w~ewaluacji wyników korzysta z~narzędzia \textit{evo}~\cite{evo2025alignment}. Stosowane jest wyrównanie metodą Umeyamy (podrozdział ~\ref{subsec:wyrownanie_umeyamy}) ze skalą, czyli transformacja $Sim(3)$, w~której wyznaczane są obrót, translacja i~współczynnik skali.
+
+Dla porównania wyników pomiędzy zbiorami do obliczenia metryk dla obu zbiorów zastosowano transformację $SE(3)$.
+Do wizualizacji trajektorie wyjściowe przesunięto jedynie do punktu początkowego trajektorii referencyjnej. Pozwala to ocenić rzeczywisty dryf oraz dokładność zachowania skali systemu.
+
+\subsection{Metryki}
+\label{subsec:metryki_trajektorii}
+
+Niech $\mathbf{p}_i^{\mathrm{est}}$ i~$\mathbf{p}_i^{\mathrm{gt}}$ oznaczają odpowiednio dopasowane w~czasie pozycję estymowaną i~referencyjną. Po transformacji $SE(3)$ błąd próbki wynosi
+\begin{equation}
+    e_i=\left\|\mathbf{p}_i^{\mathrm{gt}}-\bigl(\mathbf{R}\mathbf{p}_i^{\mathrm{est}}+\mathbf{t}\bigr)\right\|_2,
+    \label{eq:methodology_position_error}
+\end{equation}
+gdzie $\mathbf{R}$ i~$\mathbf{t}$ są obrotem i~translacją wyznaczonymi metodą Umeyamy.
+
+\textbf{ATE} (ang. \textit{Absolute Trajectory Error}) określa globalny błąd translacji:
+\begin{equation}
+    \mathrm{ATE_{RMSE}}=\sqrt{\frac{1}{N}\sum_{i=1}^{N}e_i^2}.
+    \label{eq:methodology_ate}
+\end{equation}
+Analogicznie raportowany \textbf{RMSE} (ang. \textit{Root Mean Square Error}) rotacji jest pierwiastkiem ze średniego kwadratu kąta różnicy orientacji i~jest podawany w~stopniach.
+
+\textbf{RPE} (ang. \textit{Relative Pose Error}) opisuje błąd ruchu względnego w~odstępie 1~s~\cite{sturm2012benchmark}. Dla pary próbek $i, j$ definiuje się
+\begin{equation}
+    \Delta\mathbf{T}_{ij}=\mathbf{T}_i^{-1}\mathbf{T}_j,
+    \qquad
+    \mathbf{E}_{ij}=\left(\Delta\mathbf{T}_{ij}^{\mathrm{gt}}\right)^{-1}\Delta\mathbf{T}_{ij}^{\mathrm{est}},
+    \label{eq:methodology_rpe}
+\end{equation}
+gdzie $j$ jest próbką położoną najbliżej chwili $t_i+1$~s, a~$\mathbf{T}_i$ oznacza pozę w~chwili $t_i$ (estymowaną lub referencyjną). Osobno podaje się normę translacyjnej części $\mathbf{E}_{ij}$ w~metrach oraz kąt jej części obrotowej w~stopniach.
+
+Miara \textbf{AUC} jest polem pod ważoną krzywą sukcesu prędkości~\cite{evslam2026evaluation}. Dla znormalizowanego błędu
+\begin{equation}
+    \varepsilon_i=\frac{\left\|\mathbf{v}_i^{\mathrm{gt}}-\mathbf{v}_i^{\mathrm{est}}\right\|_2}{\left\|\mathbf{v}_i^{\mathrm{gt}}\right\|_2}
+    \label{eq:methodology_velocity_error}
+\end{equation}
+próbce przypisuje się wagę $w_i=\|\mathbf{v}_i^{\mathrm{gt}}\|_2/\sum_j\|\mathbf{v}_j^{\mathrm{gt}}\|_2$. Większą wagę otrzymują zatem próbki odpowiadające szybszemu ruchowi. Krzywa sukcesu ma postać
+\begin{equation}
+    S(\xi)=\sum_i w_i\,\mathbb{I}(\varepsilon_i<\xi),
+    \qquad
+    \mathrm{AUC}=\int_0^1 S(\xi)\,\mathrm{d}\xi,
+    \label{eq:methodology_auc}
+\end{equation}
+gdzie $\mathbb{I}$ jest funkcją wskaźnikową. Próbki o~zerowej prędkości referencyjnej otrzymują zerową wagę; w~implementacji ich błąd względny jest przyjmowany jako równy zeru, co zapobiega dzieleniu przez zero. Pole jest przybliżane dla 500 równomiernie rozmieszczonych progów $\xi$ od 0 do 1.
+
+Zestawienie raportowanych wielkości zawiera tabela~\ref{tab:metryki_trajektorii}.
+
+\begin{table}[!ht]
+    \centering
+    \small
+    \caption{Metryki stosowane do oceny trajektorii.}
+    \label{tab:metryki_trajektorii}
+    \begin{tabularx}{\textwidth}{
+        >{\raggedright\arraybackslash}p{0.22\textwidth}
+        >{\raggedright\arraybackslash}X
+        >{\raggedright\arraybackslash}p{0.16\textwidth}
+    }
+        \toprule
+        Metryka & Znaczenie & Jednostka \\
+        \midrule
+        ATE RMSE & globalny błąd położenia & m \\
+        RMSE rotacji & globalna różnica orientacji & stopnie \\
+        RPE translacji & lokalny błąd ruchu & m \\
+        RPE rotacji & lokalny błąd obrotu & stopnie \\
+        AUC & pole pod ważoną krzywą sukcesu prędkości & brak \\
+        \bottomrule
+    \end{tabularx}
+\end{table}
+
+\section{Kontrolowane porównania}
+\label{sec:badania_wariantow}
+
+Zakres eksperymentów zestawiono w~tabeli~\ref{tab:macierz_eksperymentow}. Porównywane warianty muszą obejmować ten sam fragment sekwencji i~korzystać z~tego samego protokołu synchronizacji oraz metryk.
+
+\begin{table}[!ht]
+    \centering
+    \footnotesize
+    \caption{Macierz kontrolowanych porównań.}
+    \label{tab:macierz_eksperymentow}
+    \begin{tabularx}{\textwidth}{p{0.22\textwidth} p{0.34\textwidth} X}
+        \toprule
+        Badany element & Sekwencja & Warianty \\
+        \midrule
+        mechanizmy SLAM & EvSLAM \texttt{seq007\_test} & pełny SLAM / VO \\
+        filtr BAF & EvSLAM \texttt{seq001}, 961,7--976,7~s; M3ED \texttt{indoor\_flight\_1}, 5--20~s & włączony / wyłączony \\
+        źródło rotacji & M3ED \texttt{indoor\_flight\_1}, całość & PnP / żyroskop \\
+        czas akumulacji & EvSLAM \texttt{seq006}, 5--20~s; M3ED \texttt{indoor\_flight\_1}, 5--20~s & 6 / 12 / 24 / 48~ms \\
+        \bottomrule
+    \end{tabularx}
+\end{table}

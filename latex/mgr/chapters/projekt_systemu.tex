@@ -1,23 +1,78 @@
 \chapter{Projekt systemu}
-% Plan: Przedstawić wymagania, architekturę i przepływ danych zaprojektowanego systemu przed opisem szczegółów implementacyjnych. Źródła: aktualny kod pipeline.py, setup.py, konfiguracje i wymagania konkursów. Materiał: główny schemat blokowy systemu.
 \label{cha:projekt_systemu}
 
-\section{Założenia i wymagania}
-% Plan: Zdefiniować wejścia, wyjścia, tryb offline, obsługiwane sensory, skalę metryczną i oczekiwaną odporność, a także jawne elementy poza zakresem. Źródła: temat pracy, START_PROMPT.md zweryfikowany kodem i oficjalne wymagania konkursów. Materiał: tabela wymagań funkcjonalnych i ograniczeń.
+Projekt systemu zaprojektowano z~myślą o~zadaniach konkursowych EvSLAM i~M3ED. Zbiory danych różnią się sposobem organizacji informacji, strukturą pomiarów oraz zakresem dostępnej kalibracji, dlatego wymagają odrębnych etapów wczytania i~wstępnego przygotowania. Po ujednoliceniu danych wejściowych dalsze przetwarzanie realizuje wspólny algorytm estymacji ruchu i~budowy mapy.
+
+W~rozdziale przedstawiono wymagania wynikające z~obu konkursów, przyjęty zestaw czujników oraz założenia projektowe systemu. Następnie opisano strukturę rozwiązania, przepływ danych pomiędzy modułami oraz najważniejsze elementy odpowiedzialne za estymację ruchu, mapowanie i~korektę trajektorii.
+
+
+\section{Założenia wynikające z konkursów}
 \label{sec:zalozenia_systemu}
 
-\section{Architektura i przepływ danych}
-% Plan: Pokazać wspólny pipeline dla EvSLAM i M3ED od readera do trajektorii, mapy i diagnostyki, wraz z miejscami użycia żyroskopu. Źródła: pipeline.py i setup.py. Materiał: schemat blokowy z rozdzieleniem front-endu, mapy i optymalizacji.
+\subsection{EvSLAM Challenge}
+\label{subsec:projekt_evslam}
+
+EvSLAM Challenge dotyczy estymacji stanu podczas szybkich manewrów. Udostępnione dane obejmują dwa strumienie z kamer zdarzeniowych DVXplorer, pomiary IMU oraz obrazy RGB, monochromatyczne obrazy z kamer podczerwieni i mapy głębi rejestrowane przez kamerę Intel RealSense D435. Kamery zdarzeniowe mają rozdzielczość $640\times480$ i~bazę $10\mathrm{cm}$, natomiast IMU pracuje z~częstotliwością $800\mathrm{Hz}$~\cite{evslam2025data}. Rozmieszczenie czujników na platformie przedstawiono na rysunku~\ref{fig:evslam_sensors}. Konkurs przewiduje wariant wykorzystujący wyłącznie kamery zdarzeniowe jako źródło informacji wizyjnej oraz wariant łączący zdarzenia z~monochromatycznymi obrazami z kamery Intel RealSense D435~\cite{evslam2025challenge}.
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=0.9\linewidth]{evslam_sensors.png}
+\caption{Zestaw czujników wykorzystywany do rejestracji danych EvSLAM na platformie czterowirnikowego drona. Źródło: \cite{evslam2025data}.}
+\label{fig:evslam_sensors}
+\end{figure}
+
+Dla każdej sekwencji należy wyznaczyć w~zadanych chwilach pozycję i~orientację lewej kamery oraz jej prędkość liniową wyrażoną w~układzie kamery. Ocena uwzględnia bezwzględny błąd trajektorii (ang. \textit{Absolute Trajectory Error}, ATE) oraz pole pod krzywą współczynnika sukcesu dla kolejnych progów względnego błędu prędkości (ang. \textit{Area Under the Curve}, AUC). Pierwsza z tych metryk jest brana pod uwagę wyłącznie w przypadku, w którym druga (AUC), jest równa dal dwóch różnych algorytmów.
+
+\subsection{M3ED SLAM Challenge}
+\label{subsec: project_m3ed}
+
+Zbiór M3ED został zarejestrowany z~wykorzystaniem rozbudowanego zestawu czujników obejmującego stereoskopową parę kamer zdarzeniowych Prophesee EVK4 o~rozdzielczości $1280\times720$, stereoskopową parę kamer rejestrujących obrazy w~skali szarości, kamerę RGB, jednostkę IMU oraz 64-kanałowy skaner laserowy~\cite{m3ed2025data}. Dane pochodzą z~różnych platform, obejmujących samochód, bezzałogowy statek powietrzny oraz robota kroczącego, dzięki czemu zawierają ruch o~znacznie różniącej się dynamice i~charakterze.
+
+W~M3ED SLAM Challenge wykorzystanie czujników jest ograniczone do dwóch wariantów. W~wariancie \textit{Event (+ IMU)} pozycja może być wyznaczana na podstawie jednej lub dwóch kamer zdarzeniowych, opcjonalnie z~wykorzystaniem IMU. Wariant \textit{Event + Mono (+ IMU)} dopuszcza dodatkowo obrazy z~jednej kamery globalnej migawki (ang. \textit{global shutter camera})~\cite{m3ed2025challenge}.
+
+Konkurs obejmuje trzy sekwencje testowe: jazdę samochodem w~środowisku miejskim, szybki lot UAV oraz ruch robota kroczącego. Dla wskazanych znaczników czasu należy wyznaczyć pozycję i~orientację referencyjnej kamery zdarzeniowej. Dokładność jest oceniana za pomocą bezwzględnego błędu pozy (ang. \textit{Absolute Pose Error}, APE) względem trajektorii referencyjnej~\cite{m3ed2025challenge}. W~przeciwieństwie do EvSLAM wynik nie obejmuje prędkości liniowej -- wymaganym rezultatem jest wyłącznie trajektoria położenia robota.
+
+
+\subsection{Wybór konfiguracji czujników}
+\label{subsec:wybor_czujnikow}
+
+W~pracy przyjęto wspólny dla obu konkursów wariant wykorzystujący
+\textbf{dwie kamery zdarzeniowe i~IMU}. Informacja wizyjna pochodzi wyłącznie
+ze zdarzeń, dzięki czemu system odpowiada wariantom niewymagającym obrazów z kamer klatkowych. Konfiguracja stereo została wybrana z~dwóch powodów:
+
+\begin{itemize}
+    \item znana baza kamer pozwala od razu wyznaczać głębokość i~metryczną skalę translacji;
+    \item dwie obserwacje tej samej chwili ograniczają niejednoznaczność geometrii charakterystyczną dla pojedynczej kamery.
+\end{itemize}
+
+Z~IMU wykorzystywana jest prędkość kątowa. Żyroskop pomaga ograniczyć wpływ
+szybkich obrotów na reprezentację zdarzeń oraz może dostarczyć pomocniczą
+informację o~zmianie orientacji, podobnie jak w~systemach łączących zdarzenia
+z~pomiarami inercyjnymi~\cite{rebecq2017eventvio,vidal2018ultimate}.
+Akcelerometr nie jest uwzględniany, dlatego opracowane rozwiązanie nie jest
+pełnym systemem VIO: nie estymuje obciążeń pomiarowych IMU
+ani wspólnego stanu wizyjno-inercyjnego. Jest to świadome ograniczenie zakresu,
+pozwalające skupić projekt na geometrii zdarzeniowego stereo VO i~SLAM.
+
+\section{Cele i organizacja systemu}
 \label{sec:architektura_systemu}
 
-\section{Reprezentacja stanu i mapy}
-% Plan: Określić przechowywaną pozę $T_W_C$, sposób wyznaczania prędkości, znaczenie klatki kluczowej, punktu mapy i obserwacji oraz strukturę grafu. Źródła: core/trajectory.py, core/velocity.py, slam/map.py i slam/pose_graph.py. Materiał: diagram struktur danych i ich relacji.
-\label{sec:stan_i_mapa}
+System zaprojektowano tak, aby po przygotowaniu danych wejściowych zbiory EvSLAM i~M3ED mogły być przetwarzane przez wspólną część algorytmu. Najważniejsze cele projektowe obejmują:
 
-\section{Przebieg estymacji}
-% Plan: Opisać kolejność inicjalizacji, śledzenia względem mapy, fallbacku frame-to-frame, tworzenia klatek kluczowych, relokalizacji i korekty grafowej. Źródła: slam/stereo_pnp.py i slam/results.py. Materiał: diagram stanów pojedynczej iteracji z gałęziami niepowodzenia.
-\label{sec:przebieg_estymacji}
+\begin{itemize}
+\item estymację trajektorii referencyjnej kamery zdarzeniowej w~skali metrycznej;
+\item wyznaczenie prędkości liniowej z~trajektorii na potrzeby zadania EvSLAM;
+\item możliwość pracy wyłącznie jako odometria wizyjna lub z~dodatkowym wykorzystaniem mapy;
+\item relokalizację po utracie śledzenia oraz korektę dryfu po wykryciu ponownie odwiedzonego miejsca.
+\end{itemize}
 
-\section{Decyzje projektowe i ograniczenia}
-% Plan: Uzasadnić wybór agregacji do obrazów, LK, stereo, PnP i lekkiego back-endu oraz omówić brak BA, pełnej preintegracji IMU, gęstej mapy i metod uczonych. Źródła: kod oraz porównanie z literaturą. Materiał: tabela decyzja--uzasadnienie--ograniczenie.
-\label{sec:decyzje_projektowe}
+Ogólną organizację systemu i~przepływ danych przedstawiono na rysunku~\ref{fig:system_architecture}. Główny tor przetwarzania prowadzi od zsynchronizowanych strumieni zdarzeń stereo do trajektorii lewej kamery i~wyznaczanej z~niej prędkości liniowej. Opcjonalne pomiary żyroskopu mogą wspierać przygotowanie obserwacji oraz estymację pozy, natomiast wariant SLAM rozszerza system o~rzadką mapę, rozpoznawanie miejsc, relokalizację i~korektę grafu pozy.
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=1\linewidth]{system_architecture.pdf}
+    \caption{Architektura i~przepływ danych w~opracowanym systemie. Zielone pola oznaczają dane wejściowe, pomarańczowe wyniki, a~niebieskie elementy wariantu SLAM. Przerywana strzałka przedstawia warunkowe odzyskanie pozy przez relokalizację.}
+    \label{fig:system_architecture}
+\end{figure}
+
+Przepływ danych w~systemie przedstawiono na rysunku~\ref{fig:system_architecture}. Zdarzenia z~obu kamer są synchronizowane i~dzielone na wspólne okna czasowe, a~następnie poddawane filtracji oraz korekcji zniekształceń wywołanych obrotem kamery. Wykorzystywane są przy tym zsynchronizowane z~kamerami pomiary żyroskopu, natomiast pomiary akcelerometru nie uczestniczą w~obliczeniach. Przygotowane zdarzenia są przekształcane w~reprezentacje obrazowe i~rektyfikowane. System wykrywa na nich punkty, śledzi je w~czasie i~wyznacza ich głębokość na podstawie obserwacji z~obu kamer. Ruch kamery jest określany z~wykorzystaniem punktów 3D z~poprzedniego okna lub mapy oraz ich bieżących obserwacji; w~konfiguracji końcowej translacja pochodzi z~wizji, a~zmiana orientacji z~żyroskopu. Wybrane obserwacje rozwijają rzadką mapę, która wspiera dalszą lokalizację, rozpoznawanie wcześniej odwiedzonych miejsc i~korektę trajektorii. Wynikiem jest trajektoria lewej kamery, a~dla EvSLAM również wyznaczona na jej podstawie prędkość liniowa. Dane referencyjne nie uczestniczą w~estymacji i~są wykorzystywane wyłącznie podczas oceny wyników.

@@ -47,6 +47,9 @@ def main() -> None:
         if pipeline is not None:
             save_outputs(pipeline, config, interrupted)
 
+    if interrupted:
+        raise SystemExit(130)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -55,7 +58,7 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "--config",
-        default=Path("configs/evslam_seq007_test_slam.yaml"),
+        default=Path("configs/evslam.yaml"),
         type=Path,
         help="Path to the YAML configuration file.",
     )

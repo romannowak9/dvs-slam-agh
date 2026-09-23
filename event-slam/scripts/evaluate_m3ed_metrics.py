@@ -13,7 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 
-from align_m3ed_result_to_gt import load_m3ed_trajectory
+from align_m3ed_result_to_gt import evenly_spaced_indices, load_m3ed_trajectory
 from trajectory_metrics import (
     compute_pose_metrics,
     match_timestamps,
@@ -35,18 +35,23 @@ def main() -> None:
     estimate = select_trajectory_samples(estimate, estimate_indices)
     ground_truth = select_trajectory_samples(ground_truth, gt_indices)
 
+    gt_length = path_length(ground_truth.positions)
+    estimate_length = path_length(estimate.positions)
+    metric_ids = evenly_spaced_indices(len(estimate), args.downsample)
+    metric_estimate = select_trajectory_samples(estimate, metric_ids)
+    metric_ground_truth = select_trajectory_samples(ground_truth, metric_ids)
+
     metrics = compute_pose_metrics(
-        estimate,
-        ground_truth,
+        metric_estimate,
+        metric_ground_truth,
         args.rpe_delta_seconds,
     )
 
-    gt_length = path_length(ground_truth.positions)
-    estimate_length = path_length(estimate.positions)
     lines = (
         f"estimate_samples: {estimate_count}",
         f"gt_samples: {gt_count}",
         f"matched_samples: {len(estimate)}",
+        f"metric_samples: {len(metric_estimate)}",
         f"estimate_coverage: {len(estimate) / estimate_count:.9f}",
         f"gt_coverage: {len(estimate) / gt_count:.9f}",
         f"duration_s: {estimate.timestamps[-1] - estimate.timestamps[0]:.6f}",
@@ -84,7 +89,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gt", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--rpe-delta-seconds", default=1.0, type=float)
-    parser.add_argument("--timestamp-tolerance", default=1e-6, type=float)
+    parser.add_argument("--timestamp-tolerance", default=0.01, type=float)
+    parser.add_argument("--downsample", default=100, type=int)
     return parser.parse_args()
 
 

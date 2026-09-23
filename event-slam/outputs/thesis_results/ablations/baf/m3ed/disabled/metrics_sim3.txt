@@ -1,0 +1,24 @@
+M3ED trajectory metrics
+estimate_samples: 150
+gt_samples: 150
+matched_samples: 150
+metric_samples: 100
+estimate_coverage: 1.000000000
+gt_coverage: 1.000000000
+duration_s: 14.902220
+APE_translation_mean_m: 0.080093268
+APE_translation_RMSE_m: 0.087200998
+APE_translation_median_m: 0.077629985
+APE_translation_max_m: 0.189638467
+rotation_mean_deg: 3.733732378
+rotation_RMSE_deg: 3.747588553
+rotation_median_deg: 3.790637296
+rotation_max_deg: 4.145624352
+RPE_delta_target_s: 1.000000000
+RPE_delta_median_s: 1.000449000
+RPE_pair_count: 93
+RPE_translation_RMSE_m: 0.074161979
+RPE_rotation_RMSE_deg: 0.404414475
+estimated_path_length_m: 6.459209151
+gt_path_length_m: 7.201873380
+path_length_ratio: 0.896879022

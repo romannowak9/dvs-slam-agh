@@ -1,23 +1,690 @@
 \chapter{Wyniki}
-% Plan: Przedstawić wyniki tylko dla kompletnych, identyfikowalnych przebiegów i oddzielić obserwacje ilościowe od interpretacji oraz ograniczeń. Źródła: outputs z run_config.yaml, metrykami i logami. Materiał: tabele metryk, trajektorie, wykresy błędów i diagnostyka mapy.
 \label{cha:wyniki}
 
-\section{Weryfikacja etapów przetwarzania}
-% Plan: Pokazać jakościowo i liczbowo poprawność synchronizacji, rektyfikacji, kompensacji, śledzenia oraz stereo przed oceną całej trajektorii. Źródła: skrypty verification i odpowiadające im katalogi wyjściowe. Materiał: zestaw obrazów diagnostycznych i tabela odsetków zaakceptowanych obserwacji.
-\label{sec:wyniki_etapow}
+W~rozdziale przedstawiono wyniki eksperymentów porównawczych opisanych w~rozdziale~\ref{cha:metodyka_badan}, które pomagają dobrać najważniejsze parametry algorytmu i~ocenić ich wpływ na jakość wyniku. Przedstawiono również pełne wyniki dla wszystkich sekwencji ze zbioru EvSLAM oraz wybranych sekwencji ze zbioru M3ED w~celu końcowej ewaluacji.
+
+\section{Eksperymenty porównawcze}
+\label{sec:wyniki_eksperymenty}
+
+\subsection{SLAM i odometria wizyjna}
+\label{subsec:wyniki_slam_vo}
+
+Uruchomiono sekwencję \texttt{seq007\_test} z~wyłączonymi wybranymi mechanizmami algorytmu. Były to:
+\begin{itemize}
+    \item budowanie rzadkiej mapy,
+    \item estymacja pozy względem mapy,
+    \item zamknięcie pętli,
+    \item optymalizacja grafu trajektorii.
+\end{itemize}
+
+Wariant odometrii wizyjnej uzyskano przez wyłączenie mechanizmów związanych z~utrzymywaniem i~wykorzystywaniem mapy. Ruch kamery był w~nim wyznaczany wyłącznie na podstawie punktów 3D otrzymanych z~poprzedniej pary stereo. Wyłączono:
+\begin{itemize}
+    \item tworzenie klatek kluczowych i~rzadkiej mapy punktów 3D,
+    \item estymację pozy na podstawie punktów mapy lokalnej,
+    \item rozpoznawanie miejsc i~zamknięcie pętli,
+    \item optymalizację grafu trajektorii.
+\end{itemize}
+
+Wyniki przedstawiono w~tabeli~\ref{tab:wyniki_slam_vo}.
+
+\begin{table}[!ht]
+    \centering
+    \small
+    \caption{Porównanie SLAM i~VO na wspólnym fragmencie \texttt{seq007\_test}; wyrównanie $SE(3)$, RPE dla około 1~s.}
+    \label{tab:wyniki_slam_vo}
+    \resizebox{\textwidth}{!}{%
+        \begin{tabular}{lrrrrrr}
+            \toprule
+            Wariant & ATE RMSE [m] & RMSE rotacji [$^\circ$] & AUC & RPE translacji [m] & RPE rotacji [$^\circ$] & Próbki \\
+            \midrule
+            SLAM & 0,151 & 3,179 & 0,756 & 0,187 & 4,227 & 275 \\
+            VO & 0,544 & 16,256 & 0,772 & 0,174 & 5,712 & 275 \\
+            \bottomrule
+        \end{tabular}%
+    }
+\end{table}
+
+\begin{figure}[!ht]
+    \centering
+    \begin{subfigure}[t]{0.49\textwidth}
+        \centering
+        \includegraphics[width=0.49\linewidth]{ablation_evslam_seq007_slam_first_pose_trajectory_x.png}
+        \includegraphics[width=0.49\linewidth]{ablation_evslam_seq007_slam_first_pose_trajectory_y.png}
+        \includegraphics[width=0.49\linewidth]{ablation_evslam_seq007_slam_first_pose_trajectory_z.png}
+        \includegraphics[width=0.49\linewidth]{ablation_evslam_seq007_slam_first_pose_trajectory_3d.png}
+        \caption{SLAM.}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.49\textwidth}
+        \centering
+        \includegraphics[width=0.49\linewidth]{ablation_evslam_seq007_vo_first_pose_trajectory_x.png}
+        \includegraphics[width=0.49\linewidth]{ablation_evslam_seq007_vo_first_pose_trajectory_y.png}
+        \includegraphics[width=0.49\linewidth]{ablation_evslam_seq007_vo_first_pose_trajectory_z.png}
+        \includegraphics[width=0.49\linewidth]{ablation_evslam_seq007_vo_first_pose_trajectory_3d.png}
+        \caption{Odometria wizyjna.}
+    \end{subfigure}
+    \caption{Trajektorie w~historycznym porównaniu SLAM i~VO. Kolejne małe wykresy przedstawiają $x$, $y$, $z$ i~widok 3D.}
+    \label{fig:wyniki_slam_vo}
+\end{figure}
+
+Warstwa SLAM wyraźnie zmniejszyła globalny błąd położenia i~orientacji oraz rotacyjny RPE. Nie poprawiła jednak AUC ani translacyjnego RPE. Na wykresach trajektorii przedstawionych na rysunku~\ref{fig:wyniki_slam_vo} można zaobserwować spodziewaną różnicę między SLAM a~VO. W~systemie bez korekty pozy na podstawie wykrycia wcześniej odwiedzonego miejsca występuje znaczny dryf estymowanego położenia.
+
+\subsection{Filtr BAF}
+\label{subsec:wyniki_baf}
+
+W celu weryfikacji efektów zastosowania filtracji uruchomiono system z włączonym filtrem BAF oraz bez niego. Wybrano sekwencje EvSLAM \texttt{seq001} oraz M3ED \texttt{falcon\_indoor\_flight\_1}. Dla obu sekwencji przetworzono fragmenty z jednakowego przedziału czasowego. Aby zmniejszyć czas trwania eksperymentu zastosowano krótki 15-sekundowy przedział (od 5 do 20 s), który jednak pozwala na ocenę efektów filtracji. Rozpoczęcie eksperymentu od 5 sekundy pozwala na pominięcie początkowego etapu, w którym ruch nie występuje lub jest powolny.
+
+\begin{table}[!ht]
+    \centering
+    \small
+    \caption{Porównanie z~BAF i~bez BAF na fragmentach EvSLAM \texttt{seq001} i~M3ED \texttt{falcon\_indoor\_flight\_1};}
+    \label{tab:wyniki_baf}
+    \resizebox{\textwidth}{!}{%
+        \begin{tabular}{llrrrrrr}
+            \toprule
+            Zbiór & BAF & Zmiana czasu przetwarzania po zastosowaniu filtracji & ATE RMSE $SE(3)$ [m] & RMSE rotacji [$^\circ$] & AUC & RPE translacji [m] & RPE rotacji [$^\circ$] \\
+            \midrule
+            EvSLAM & wyłączony & -- & 0,675 & 5,197 & 0,852 & 0,411 & 2,540 \\
+            EvSLAM & włączony & +7,2\% & 0,574 & 6,784 & 0,849 & 0,396 & 2,544 \\
+            M3ED & wyłączony & -- & 0,103 & 1,540 & 0,866 & 0,068 & 0,482 \\
+            M3ED & włączony & +207,5\% & 0,065 & 2,332 & 0,903 & 0,050 & 0,435 \\
+            \bottomrule
+        \end{tabular}%
+    }
+\end{table}
+
+Na fragmencie EvSLAM filtr zmniejszył ATE i~translacyjny RPE, lecz nieznacznie pogorszył pozostałe miary. Czas wykonania wzrósł przy tym z~781~s do 837~s, czyli o~7,2\%. Na fragmencie M3ED filtr poprawił wszystkie raportowane błędy poza globalnym RMSE rotacji, ale wydłużył czas przetwarzania z~255~s do 784~s, czyli o~207,5\%. Podane wyniki pozwalają ocenić koszt BAF wyłącznie dla badanych sekwencji i~konfiguracji. Ze względu na większą liczbę zdarzeń występujących w~sekwencji M3ED filtr znacznie wydłużył obliczenia. Ponieważ cecha ta występuje również w~innych sekwencjach tego zbioru, zdecydowano o~wyłączeniu filtracji dla M3ED i~pozostawieniu jej dla EvSLAM.
+Odpowiadające tym wynikom przebiegi trajektorii przedstawiono na rysunku~\ref{fig:wyniki_baf}.
+
+\begin{figure}[!ht]
+    \centering
+    \begin{subfigure}[t]{0.49\textwidth}
+        \centering
+        \includegraphics[width=0.49\linewidth]{ablation_evslam_seq001_baf_disabled_first_pose_trajectory_x.png}
+        \includegraphics[width=0.49\linewidth]{ablation_evslam_seq001_baf_disabled_first_pose_trajectory_y.png}
+        \includegraphics[width=0.49\linewidth]{ablation_evslam_seq001_baf_disabled_first_pose_trajectory_z.png}
+        \includegraphics[width=0.49\linewidth]{ablation_evslam_seq001_baf_disabled_first_pose_trajectory_3d.png}
+        \caption{EvSLAM, BAF wyłączony.}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.49\textwidth}
+        \centering
+        \includegraphics[width=0.49\linewidth]{ablation_evslam_seq001_baf_enabled_first_pose_trajectory_x.png}
+        \includegraphics[width=0.49\linewidth]{ablation_evslam_seq001_baf_enabled_first_pose_trajectory_y.png}
+        \includegraphics[width=0.49\linewidth]{ablation_evslam_seq001_baf_enabled_first_pose_trajectory_z.png}
+        \includegraphics[width=0.49\linewidth]{ablation_evslam_seq001_baf_enabled_first_pose_trajectory_3d.png}
+        \caption{EvSLAM, BAF włączony.}
+    \end{subfigure}
+
+    \begin{subfigure}[t]{0.49\textwidth}
+        \centering
+        \includegraphics[width=0.49\linewidth]{ablation_m3ed_falcon_indoor_flight_1_baf_disabled_first_pose_trajectory_x.png}
+        \includegraphics[width=0.49\linewidth]{ablation_m3ed_falcon_indoor_flight_1_baf_disabled_first_pose_trajectory_y.png}
+        \includegraphics[width=0.49\linewidth]{ablation_m3ed_falcon_indoor_flight_1_baf_disabled_first_pose_trajectory_z.png}
+        \includegraphics[width=0.49\linewidth]{ablation_m3ed_falcon_indoor_flight_1_baf_disabled_first_pose_trajectory_3d.png}
+        \caption{M3ED, BAF wyłączony.}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.49\textwidth}
+        \centering
+        \includegraphics[width=0.49\linewidth]{ablation_m3ed_falcon_indoor_flight_1_baf_enabled_first_pose_trajectory_x.png}
+        \includegraphics[width=0.49\linewidth]{ablation_m3ed_falcon_indoor_flight_1_baf_enabled_first_pose_trajectory_y.png}
+        \includegraphics[width=0.49\linewidth]{ablation_m3ed_falcon_indoor_flight_1_baf_enabled_first_pose_trajectory_z.png}
+        \includegraphics[width=0.49\linewidth]{ablation_m3ed_falcon_indoor_flight_1_baf_enabled_first_pose_trajectory_3d.png}
+        \caption{M3ED, BAF włączony.}
+    \end{subfigure}
+    \caption{Trajektorie 15-sekundowych fragmentów w~porównaniu BAF. Kolejne małe wykresy przedstawiają $x$, $y$, $z$ i~widok 3D.}
+    \label{fig:wyniki_baf}
+\end{figure}
+
+\clearpage
+
+\subsection{Źródło rotacji}
+\label{subsec:wyniki_rotation_source}
+
+System uruchomiono w~dwóch wariantach na pełnej sekwencji M3ED \texttt{falcon\_indoor\_flight\_1}. W~pierwszym PnP wyznacza rotację i~translację, a~w~drugim rotacja pochodzi z~żyroskopu i~z~wizji wyznaczana jest tylko translacja. Wyniki zestawiono w~tabeli~\ref{tab:wyniki_rotation_source}.
+
+\begin{table}[!ht]
+    \centering
+    \small
+    \caption{Porównanie źródła rotacji na pełnej sekwencji M3ED \texttt{falcon\_indoor\_flight\_1}; wyrównanie $SE(3)$, RPE dla około 1~s.}
+    \label{tab:wyniki_rotation_source}
+    \resizebox{\textwidth}{!}{%
+        \begin{tabular}{lrrrrr}
+            \toprule
+            Wariant & ATE RMSE [m] & RMSE rot. [$^\circ$] & AUC & RPE trans. [m] & RPE rot. [$^\circ$] \\
+            \midrule
+            pełne PnP & 0,240 & 9,885 & 0,748 & 0,152 & 1,861 \\
+            rotacja z~żyroskopu & 0,162 & 4,434 & 0,830 & 0,092 & 0,514 \\
+            \bottomrule
+        \end{tabular}%
+    }
+\end{table}
+
+\begin{figure}[!ht]
+    \centering
+    \begin{subfigure}[t]{0.96\textwidth}
+        \centering
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_rotation_from_pnp_first_pose_trajectory_x.png}
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_rotation_from_pnp_first_pose_trajectory_y.png}
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_rotation_from_pnp_first_pose_trajectory_z.png}
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_rotation_from_pnp_first_pose_trajectory_3d.png}
+        \caption{Rotacja i~translacja z~PnP.}
+    \end{subfigure}
+
+    \vspace{2mm}
+
+    \begin{subfigure}[t]{0.96\textwidth}
+        \centering
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_rotation_from_imu_first_pose_trajectory_x.png}
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_rotation_from_imu_first_pose_trajectory_y.png}
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_rotation_from_imu_first_pose_trajectory_z.png}
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_rotation_from_imu_first_pose_trajectory_3d.png}
+        \caption{Rotacja z~żyroskopu, translacja z~wizji.}
+    \end{subfigure}
+    \caption{Trajektorie pełnej sekwencji M3ED \texttt{falcon\_indoor\_flight\_1} w~porównaniu źródła rotacji. W~każdym wierszu pokazano kolejno $x$, $y$, $z$ i~widok 3D.}
+    \label{fig:wyniki_rotation_source}
+\end{figure}
+
+Rotacja z~żyroskopu zmniejszyła ATE, RMSE rotacji oraz obie składowe RPE, a~także zwiększyła AUC. Dla tej sekwencji jej bezpośrednie użycie było więc korzystniejsze od wyznaczania pełnej pozy za pomocą PnP. Trajektorie przedstawiono na rysunku~\ref{fig:wyniki_rotation_source}. Ponieważ w~czasie rozwoju systemu podobne efekty zauważono także dla innych testowanych sekwencji, w~konfiguracji końcowej przyjęto rotację wyznaczaną za pomocą żyroskopu.
+
+\subsection{Czas akumulacji zdarzeń}
+\label{subsec:wyniki_accumulation}
+
+Rysunek~\ref{fig:wyniki_window_previews} pokazuje bezpośredni wpływ długości okna na reprezentację tego samego momentu sekwencji. Klatki utworzoen przy użyciu dłuższego okna zawierają więcej aktywności.
+
+Wpływ na estymację oceniono na fragmentach z jednakowego przedziału 5--20~s sekwencji EvSLAM \texttt{seq006} i~M3ED \texttt{falcon\_indoor\_flight\_1}. W~każdym wariancie stała zaniku $\tau$ była równa długości okna. Przedział czasowy ograniczony do $15 s$ pozwala skutecznie ocenić wpływ rozmiaru okna, pozwalając na przeprowadzenie eksperymentów dla większego zbioru badanych wartości, dzięki ograniczeniu czasu przetwarzania sekwencji. Rozpoczęcie eksperymentu od 5 sekundy pozwala na pominięcie początkowego etapu, w którym ruch nie występuje lub jest powolny.
+
+\begin{figure}[!ht]
+    \centering
+    \begin{subfigure}[t]{0.235\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{ablation_evslam_seq006_accumulation_006ms_left_event_frame.png}
+        \caption{6~ms.}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.235\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{ablation_evslam_seq006_accumulation_012ms_left_event_frame.png}
+        \caption{12~ms.}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.235\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{ablation_evslam_seq006_accumulation_024ms_left_event_frame.png}
+        \caption{24~ms.}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.235\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{ablation_evslam_seq006_accumulation_048ms_left_event_frame.png}
+        \caption{48~ms.}
+    \end{subfigure}
+    \caption{Reprezentacje zdarzeń z~lewej kamery utworzone dla tego samego fragmentu \texttt{seq006} przy czterech czasach akumulacji.}
+    \label{fig:wyniki_window_previews}
+\end{figure}
+
+\begin{table}[!ht]
+    \centering
+    \small
+    \caption{Porównanie czasu akumulacji; metryki po wyrównaniu $SE(3)$.}
+    \label{tab:wyniki_accumulation}
+    \resizebox{\textwidth}{!}{%
+        \begin{tabular}{llrrrrr}
+            \toprule
+            Zbiór & Okno [ms] & ATE RMSE [m] & RMSE rot. [$^\circ$] & AUC & RPE trans. [m] & RPE rot. [$^\circ$] \\
+            \midrule
+            EvSLAM & 6 & 0,102 & 11,900 & 0,498 & 0,186 & 19,800 \\
+            EvSLAM & 12 & 0,111 & 12,740 & 0,502 & 0,196 & 20,704 \\
+            EvSLAM & 24 & 0,161 & 21,058 & 0,398 & 0,228 & 24,788 \\
+            EvSLAM & 48 & 0,296 & 47,304 & 0,093 & 0,452 & 63,585 \\
+            M3ED & 6 & 0,431 & 8,208 & 0,515 & 0,295 & 0,671 \\
+            M3ED & 12 & 0,224 & 5,102 & 0,717 & 0,131 & 0,367 \\
+            M3ED & 24 & 0,103 & 1,540 & 0,866 & 0,068 & 0,481 \\
+            M3ED & 48 & 0,055 & 2,856 & 0,927 & 0,049 & 0,493 \\
+            \bottomrule
+        \end{tabular}%
+    }
+\end{table}
+
+\clearpage
+
+Rysunki~\ref{fig:wyniki_accumulation_evslam} i~\ref{fig:wyniki_accumulation_m3ed} przedstawiają odpowiednio przebiegi EvSLAM i~M3ED.
+
+\begin{figure}[!ht]
+    \centering
+    \begin{subfigure}[t]{0.96\textwidth}
+        \centering
+        \includegraphics[width=0.24\linewidth]{ablation_evslam_seq006_accumulation_006ms_first_pose_trajectory_x.png}
+        \includegraphics[width=0.24\linewidth]{ablation_evslam_seq006_accumulation_006ms_first_pose_trajectory_y.png}
+        \includegraphics[width=0.24\linewidth]{ablation_evslam_seq006_accumulation_006ms_first_pose_trajectory_z.png}
+        \includegraphics[width=0.24\linewidth]{ablation_evslam_seq006_accumulation_006ms_first_pose_trajectory_3d.png}
+        \caption{Okno 6~ms.}
+    \end{subfigure}
+
+    \begin{subfigure}[t]{0.96\textwidth}
+        \centering
+        \includegraphics[width=0.24\linewidth]{ablation_evslam_seq006_accumulation_012ms_first_pose_trajectory_x.png}
+        \includegraphics[width=0.24\linewidth]{ablation_evslam_seq006_accumulation_012ms_first_pose_trajectory_y.png}
+        \includegraphics[width=0.24\linewidth]{ablation_evslam_seq006_accumulation_012ms_first_pose_trajectory_z.png}
+        \includegraphics[width=0.24\linewidth]{ablation_evslam_seq006_accumulation_012ms_first_pose_trajectory_3d.png}
+        \caption{Okno 12~ms.}
+    \end{subfigure}
+
+    \begin{subfigure}[t]{0.96\textwidth}
+        \centering
+        \includegraphics[width=0.24\linewidth]{ablation_evslam_seq006_accumulation_024ms_first_pose_trajectory_x.png}
+        \includegraphics[width=0.24\linewidth]{ablation_evslam_seq006_accumulation_024ms_first_pose_trajectory_y.png}
+        \includegraphics[width=0.24\linewidth]{ablation_evslam_seq006_accumulation_024ms_first_pose_trajectory_z.png}
+        \includegraphics[width=0.24\linewidth]{ablation_evslam_seq006_accumulation_024ms_first_pose_trajectory_3d.png}
+        \caption{Okno 24~ms.}
+    \end{subfigure}
+
+    \begin{subfigure}[t]{0.96\textwidth}
+        \centering
+        \includegraphics[width=0.24\linewidth]{ablation_evslam_seq006_accumulation_048ms_first_pose_trajectory_x.png}
+        \includegraphics[width=0.24\linewidth]{ablation_evslam_seq006_accumulation_048ms_first_pose_trajectory_y.png}
+        \includegraphics[width=0.24\linewidth]{ablation_evslam_seq006_accumulation_048ms_first_pose_trajectory_z.png}
+        \includegraphics[width=0.24\linewidth]{ablation_evslam_seq006_accumulation_048ms_first_pose_trajectory_3d.png}
+        \caption{Okno 48~ms.}
+    \end{subfigure}
+    \caption{Trajektorie fragmentu 5--20~s sekwencji EvSLAM \texttt{seq006} dla czterech czasów akumulacji. W~każdym wierszu pokazano kolejno $x$, $y$, $z$ i~widok 3D.}
+    \label{fig:wyniki_accumulation_evslam}
+\end{figure}
+
+\begin{figure}[!ht]
+    \centering
+    \begin{subfigure}[t]{0.96\textwidth}
+        \centering
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_accumulation_006ms_first_pose_trajectory_x.png}
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_accumulation_006ms_first_pose_trajectory_y.png}
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_accumulation_006ms_first_pose_trajectory_z.png}
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_accumulation_006ms_first_pose_trajectory_3d.png}
+        \caption{Okno 6~ms.}
+    \end{subfigure}
+
+    \begin{subfigure}[t]{0.96\textwidth}
+        \centering
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_accumulation_012ms_first_pose_trajectory_x.png}
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_accumulation_012ms_first_pose_trajectory_y.png}
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_accumulation_012ms_first_pose_trajectory_z.png}
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_accumulation_012ms_first_pose_trajectory_3d.png}
+        \caption{Okno 12~ms.}
+    \end{subfigure}
+
+    \begin{subfigure}[t]{0.96\textwidth}
+        \centering
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_accumulation_024ms_first_pose_trajectory_x.png}
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_accumulation_024ms_first_pose_trajectory_y.png}
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_accumulation_024ms_first_pose_trajectory_z.png}
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_accumulation_024ms_first_pose_trajectory_3d.png}
+        \caption{Okno 24~ms.}
+    \end{subfigure}
+
+    \begin{subfigure}[t]{0.96\textwidth}
+        \centering
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_accumulation_048ms_first_pose_trajectory_x.png}
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_accumulation_048ms_first_pose_trajectory_y.png}
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_accumulation_048ms_first_pose_trajectory_z.png}
+        \includegraphics[width=0.24\linewidth]{ablation_m3ed_falcon_indoor_flight_1_accumulation_048ms_first_pose_trajectory_3d.png}
+        \caption{Okno 48~ms.}
+    \end{subfigure}
+    \caption{Trajektorie fragmentu 5--20~s sekwencji M3ED \texttt{falcon\_indoor\_flight\_1} dla czterech czasów akumulacji. W~każdym wierszu pokazano kolejno $x$, $y$, $z$ i~widok 3D.}
+    \label{fig:wyniki_accumulation_m3ed}
+\end{figure}
+
+\clearpage
+
+Wyniki zestawione w~tabeli~\ref{tab:wyniki_accumulation} pokazują, że na fragmencie sekwencji ze zbioru EvSLAM najniższe ATE i~błędy rotacji uzyskano dla 6~ms, a~najwyższe AUC dla 12~ms. Dłuższe okna pogarszały wynik szybkiego ruchu ramienia. Na fragmencie sekwencji ze zbioru M3ED okno 48~ms dało najmniejsze ATE i~translacyjny RPE oraz najwyższe AUC, natomiast najmniejszy globalny błąd rotacji uzyskano dla 24~ms. Porównanie potwierdza, że korzystny czas akumulacji zależy od charakteru ruchu i~zbioru danych. W~konfiguracji końcowej przyjęto:
+\begin{itemize}
+    \item 12~ms dla EvSLAM, ze względu na najwyższą wartość najważniejszej w~konkursie metryki AUC;
+    \item 24~ms dla M3ED jako wartość bezpieczniejszą dla często występujących w~tym zbiorze sekwencji bardziej dynamicznych niż testowana, dla której najlepszy wynik uzyskano przy 48~ms.
+\end{itemize}
 
 \section{Wyniki dla zbioru EvSLAM}
-% Plan: Podać rezultaty wybranych pełnych sekwencji z konfiguracją, zakresem, first_pose, ATE, RVE AUC i dodatkowymi RMSE lub RPE. Źródła: oficjalny protokół EvSLAM, evaluate_evslam_metrics.py i kompletne outputs. Materiał: tabela wyników, trajektorie i krzywa sukcesu RVE.
 \label{sec:wyniki_evslam}
 
+\subsection{Dokładność trajektorii i prędkości}
+\label{subsec:wyniki_evslam_metryki}
+
+Dla zbioru EvSLAM przetworzono wszystkie siedem dostępnych sekwencji testowych.
+
+\begin{table}[!ht]
+    \centering
+    \small
+    \caption{Wyniki końcowe na zbiorze EvSLAM. ATE RMSE i~AUC obliczono zgodnie z~oficjalnym protokołem~\cite{zhong2026evslam,evslam2026evaluation}.}
+    \label{tab:wyniki_evslam_final}
+    \begin{tabularx}{\textwidth}{l X r r r}
+        \toprule
+        Sekwencja & Scenariusz & Pokrycie GT [\%] & ATE RMSE [m] & AUC \\
+        \midrule
+        \texttt{seq001} & dron, ruch po okręgu & 99,8 & 0,901 & 0,821 \\
+        \texttt{seq002} & dron, szybszy ruch po okręgu & 99,7 & 0,780 & 0,828 \\
+        \texttt{seq003} & dron, ruch z~odcinkami prostymi & 99,8 & 0,333 & 0,852 \\
+        \texttt{seq004} & dron, szybszy ruch z~odcinkami prostymi & 99,7 & 0,649 & 0,757 \\
+        \texttt{seq005} & platforma liniowa & 98,4 & 0,077 & 0,800 \\
+        \texttt{seq006} & ramię robota & 99,6 & 0,111 & 0,506 \\
+        \texttt{seq007} & robot kołowy, jazda po okręgu & 100,0 & 0,801 & 0,433 \\
+        \midrule
+        Suma konkursowa & & & 3,654 & 4,996 \\
+        Średnia & & 99,6 & 0,522 & 0,714 \\
+        \bottomrule
+    \end{tabularx}
+\end{table}
+
+Najmniejszy błąd położenia uzyskano dla ruchu platformy liniowej, a~największy dla \texttt{seq001}. Najwyższe AUC osiągnięto dla \texttt{seq003}, natomiast najniższe dla \texttt{seq007}. Różna kolejność sekwencji według ATE i~AUC pokazuje, że miary oceniają inne własności wyniku: zgodność globalnej trajektorii oraz chwilową estymację prędkości. W~rankingu konkursowym sumowane są wartości siedmiu sekwencji; średnie podano jedynie dla łatwiejszej interpretacji.
+
+Na wszystkich rysunkach porównujących trajektorię estymowaną z~GT wyrównano ją wyłącznie do pierwszej dopasowanej pozy referencyjnej. Dalszy przebieg ani skala nie są korygowane, dlatego na wykresach pozostają widoczne narastające błędy orientacji i~skali, jeśli występują. Wyrównanie Umeyamy jest używane wyłącznie do obliczania metryk.
+
+Przebiegi dla \texttt{seq001}--\texttt{seq007} przedstawiono odpowiednio na rysunkach~\ref{fig:evslam_seq001_trajectory}, \ref{fig:evslam_seq002_trajectory}, \ref{fig:evslam_seq003_trajectory}, \ref{fig:evslam_seq004_trajectory}, \ref{fig:evslam_seq005_trajectory}, \ref{fig:evslam_seq006_trajectory} i~\ref{fig:evslam_seq007_trajectory}. Każdy rysunek przedstawia wykresy estymowanych składowych położenia, widok trajektorii w~trójwymiarowej przestrzeni oraz wykresy estymowanych składowych prędkości liniowej. Na rysunkach przedstawiono również dane z trajektorii referencyjnych (ang. \textit{groundtruth}), co umożliwia wizualną ocenę jakości wyników.
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq001_trajectory_x.png}
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq001_trajectory_y.png}
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq001_trajectory_z.png}
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq001_trajectory_3d.png}
+    \includegraphics[width=0.31\textwidth]{results_evslam_seq001_velocity_x.png}
+    \includegraphics[width=0.31\textwidth]{results_evslam_seq001_velocity_y.png}
+    \includegraphics[width=0.31\textwidth]{results_evslam_seq001_velocity_z.png}
+    \caption{\texttt{seq001}, całość, konfiguracja końcowa: współrzędne położenia $x$, $y$, $z$, widok 3D oraz składowe prędkości $v_x$, $v_y$ i~$v_z$.}
+    \label{fig:evslam_seq001_trajectory}
+\end{figure}
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq002_trajectory_x.png}
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq002_trajectory_y.png}
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq002_trajectory_z.png}
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq002_trajectory_3d.png}
+    \includegraphics[width=0.31\textwidth]{results_evslam_seq002_velocity_x.png}
+    \includegraphics[width=0.31\textwidth]{results_evslam_seq002_velocity_y.png}
+    \includegraphics[width=0.31\textwidth]{results_evslam_seq002_velocity_z.png}
+    \caption{\texttt{seq002}, całość, konfiguracja końcowa: współrzędne położenia $x$, $y$, $z$, widok 3D oraz składowe prędkości $v_x$, $v_y$ i~$v_z$.}
+    \label{fig:evslam_seq002_trajectory}
+\end{figure}
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq003_trajectory_x.png}
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq003_trajectory_y.png}
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq003_trajectory_z.png}
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq003_trajectory_3d.png}
+    \includegraphics[width=0.31\textwidth]{results_evslam_seq003_velocity_x.png}
+    \includegraphics[width=0.31\textwidth]{results_evslam_seq003_velocity_y.png}
+    \includegraphics[width=0.31\textwidth]{results_evslam_seq003_velocity_z.png}
+    \caption{\texttt{seq003}, całość, konfiguracja końcowa: współrzędne położenia $x$, $y$, $z$, widok 3D oraz składowe prędkości $v_x$, $v_y$ i~$v_z$.}
+    \label{fig:evslam_seq003_trajectory}
+\end{figure}
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq004_trajectory_x.png}
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq004_trajectory_y.png}
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq004_trajectory_z.png}
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq004_trajectory_3d.png}
+    \includegraphics[width=0.31\textwidth]{results_evslam_seq004_velocity_x.png}
+    \includegraphics[width=0.31\textwidth]{results_evslam_seq004_velocity_y.png}
+    \includegraphics[width=0.31\textwidth]{results_evslam_seq004_velocity_z.png}
+    \caption{\texttt{seq004}, całość, konfiguracja końcowa: współrzędne położenia $x$, $y$, $z$, widok 3D oraz składowe prędkości $v_x$, $v_y$ i~$v_z$.}
+    \label{fig:evslam_seq004_trajectory}
+\end{figure}
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq005_trajectory_x.png}
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq005_trajectory_y.png}
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq005_trajectory_z.png}
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq005_trajectory_3d.png}
+    \includegraphics[width=0.31\textwidth]{results_evslam_seq005_velocity_x.png}
+    \includegraphics[width=0.31\textwidth]{results_evslam_seq005_velocity_y.png}
+    \includegraphics[width=0.31\textwidth]{results_evslam_seq005_velocity_z.png}
+    \caption{\texttt{seq005}, całość, konfiguracja końcowa: współrzędne położenia $x$, $y$, $z$, widok 3D oraz składowe prędkości $v_x$, $v_y$ i~$v_z$.}
+    \label{fig:evslam_seq005_trajectory}
+\end{figure}
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq006_trajectory_x.png}
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq006_trajectory_y.png}
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq006_trajectory_z.png}
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq006_trajectory_3d.png}
+    \includegraphics[width=0.31\textwidth]{results_evslam_seq006_velocity_x.png}
+    \includegraphics[width=0.31\textwidth]{results_evslam_seq006_velocity_y.png}
+    \includegraphics[width=0.31\textwidth]{results_evslam_seq006_velocity_z.png}
+    \caption{\texttt{seq006}, całość, konfiguracja końcowa: współrzędne położenia $x$, $y$, $z$, widok 3D oraz składowe prędkości $v_x$, $v_y$ i~$v_z$.}
+    \label{fig:evslam_seq006_trajectory}
+\end{figure}
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq007_trajectory_x.png}
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq007_trajectory_y.png}
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq007_trajectory_z.png}
+    \includegraphics[width=0.40\textwidth]{results_evslam_seq007_trajectory_3d.png}
+    \includegraphics[width=0.31\textwidth]{results_evslam_seq007_velocity_x.png}
+    \includegraphics[width=0.31\textwidth]{results_evslam_seq007_velocity_y.png}
+    \includegraphics[width=0.31\textwidth]{results_evslam_seq007_velocity_z.png}
+    \caption{\texttt{seq007}, całość, konfiguracja końcowa: współrzędne położenia $x$, $y$, $z$, widok 3D oraz składowe prędkości $v_x$, $v_y$ i~$v_z$.}
+    \label{fig:evslam_seq007_trajectory}
+\end{figure}
+
+Rysunek~\ref{fig:evslam_success_curve} przedstawia krzywe sukcesu, których pola tworzą wartości AUC. Niższy przebieg krzywych \texttt{seq006} i~\texttt{seq007} odpowiada ich niższym wynikom w~tabeli~\ref{tab:wyniki_evslam_final}.
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=0.82\textwidth]{results_evslam_official_velocity_success_curve.pdf}
+    \caption{Ważone krzywe sukcesu prędkości dla siedmiu sekwencji EvSLAM.}
+    \label{fig:evslam_success_curve}
+\end{figure}
+
+\clearpage
+
+\subsection{Porównanie z opublikowanymi wynikami}
+\label{subsec:porownanie_evslam_literatura}
+
+Tabela~\ref{tab:evslam_sota_comparison} zestawia wyniki systemu z~wybranymi rezultatami opublikowanymi dla tych samych sekwencji. FETAP~\cite{liu2025fetap} korzysta z~jednej kamery zdarzeniowej, kamery klatkowej i~IMU; SuperEvent~\cite{burkhardt2025superevent} oraz EVIV~\cite{lu2025eviv} z~pary kamer zdarzeniowych i~IMU, a~SDEVO~\cite{zhong2025sdevo} wyłącznie z~pary kamer zdarzeniowych. Opracowany system wykorzystuje stereo zdarzeniowe i~żyroskop, dlatego zestawienie pokazuje poziom wyników na wspólnym protokole, lecz nie stanowi porównania metod o~identycznych wejściach~\cite{zhong2026evslam}.
+
+\begin{table}[!ht]
+    \centering
+    \scriptsize
+    \caption{Porównanie ATE RMSE [m] / AUC na podstawie tabeli VII publikacji~\cite{zhong2026evslam}.}
+    \label{tab:evslam_sota_comparison}
+    \resizebox{\textwidth}{!}{%
+        \begin{tabular}{lccccc}
+            \toprule
+            Sekwencja & Opracowany system & FETAP~\cite{liu2025fetap} & SuperEvent~\cite{burkhardt2025superevent} & SDEVO~\cite{zhong2025sdevo} & EVIV~\cite{lu2025eviv} \\
+            \midrule
+            \texttt{seq001} & 0,901 / 0,821 & 0,292 / 0,890 & 0,189 / 0,879 & 0,373 / 0,860 & 2,068 / 0,872 \\
+            \texttt{seq002} & 0,780 / 0,828 & 0,113 / 0,899 & 0,282 / 0,883 & 0,388 / 0,871 & 1,659 / 0,872 \\
+            \texttt{seq003} & 0,333 / 0,852 & 0,116 / 0,930 & 0,080 / 0,904 & 0,418 / 0,905 & 0,885 / 0,879 \\
+            \texttt{seq004} & 0,649 / 0,757 & 0,080 / 0,911 & 0,055 / 0,901 & 0,344 / 0,875 & 2,283 / 0,808 \\
+            \texttt{seq005} & 0,077 / 0,800 & 0,019 / 0,921 & 0,045 / 0,869 & 0,038 / 0,914 & 0,227 / 0,861 \\
+            \texttt{seq006} & 0,111 / 0,506 & 0,048 / 0,831 & 0,033 / 0,857 & 0,069 / 0,855 & 1,966 / 0,805 \\
+            \texttt{seq007} & 0,801 / 0,433 & 0,149 / 0,904 & 0,179 / 0,844 & 0,263 / 0,854 & 1,505 / 0,784 \\
+            \midrule
+            Średnia & 0,522 / 0,714 & 0,117 / 0,898 & 0,123 / 0,877 & 0,271 / 0,876 & 1,513 / 0,840 \\
+            \bottomrule
+        \end{tabular}%
+    }
+\end{table}
+
+Średnia wartość ATE opracowanego systemu jest mniejsza niż dla EVIV, ale większa niż dla FETAP, SuperEvent i~SDEVO. Średnia wartość AUC jest niższa od wszystkich zestawionych metod. Największa różnica AUC występuje dla \texttt{seq007}; bez dodatkowej diagnostyki nie przesądza to jednak o~jej przyczynie ani o~uogólnieniu wyniku na cały rodzaj ruchu.
+
+W~tabeli~\ref{tab:evslam_competition_results} zestawiono wynik opracowanego systemu z~końcowym rankingiem konkursu EvSLAM. Wszystkie wartości dotyczą tych samych siedmiu sekwencji i~zostały obliczone według wspólnego protokołu ewaluacyjnego. Suma AUC ocenia dokładność wyznaczania prędkości, przy czym większa wartość oznacza lepszy wynik, natomiast suma ATE opisuje łączny błąd położenia i~powinna być jak najmniejsza. Miejsca w tabeli w pierwszej kolejności wyznacza wartość ATE. AUC jest porównywane dopiero w przypadku remisu.
+
+\newpage
+
+Rdzeń opracowanego systemu łączy przetwarzanie klatek zdarzeniowych i~śledzenie punktów inspirowane zdarzeniowym VIO Rebecqa~\cite{rebecq2017eventvio} oraz UltimateSLAM~\cite{vidal2018ultimate}, strukturę stereo i~mapy lokalnej wzorowaną na S-PTAM~\cite{pire2017sptam}, a~także rozpoznawanie miejsc i~domykanie pętli inspirowane ORB-SLAM2~\cite{murartal2017orbslam2}. Wynik przedstawiony w~tabeli pozwala ocenić takie połączenie klasycznych metod geometrycznych i~reprezentacji
+danych zdarzeniowych na tle pozostałych rozwiązań konkursowych.
+
+\begin{table}[!ht]
+    \centering
+    \small
+    \caption{Końcowe wyniki konkursu EvSLAM i~wynik opracowanego systemu~\cite{evslam2025challenge}.}
+    \label{tab:evslam_competition_results}
+    \begin{tabularx}{0.82\textwidth}{c X r r}
+        \toprule
+        Miejsce & Metoda & Suma AUC $\uparrow$ & Suma ATE [m] $\downarrow$ \\
+        \midrule
+        1 & SuperPoint + FETAP + VINS & 6,286 & 0,817 \\
+        2 & OKVIS2 + SuperEvent & 6,271 & 0,448 \\
+        3 & OKVIS2 + SuperEvent bez obrazów & 6,137 & 0,863 \\
+        4 & SDEVO & 6,133 & 1,894 \\
+        5 & REFIO & 6,083 & 1,344 \\
+        6 & DEIO + LC & 6,048 & 0,464 \\
+        7 & EVIV & 5,881 & 10,594 \\
+        -- & Opracowany system & 4,996 & 3,654 \\
+        8 & \texttt{test-0829} & 2,829 & 243,636 \\
+        \bottomrule
+    \end{tabularx}
+\end{table}
+
+Największą sumę AUC uzyskało rozwiązanie łączące SuperPoint, FETAP i~VINS, natomiast najmniejszą sumę ATE osiągnęło połączenie OKVIS2 z~SuperEvent. Wyniki wariantów SuperEvent pokazują, że wykorzystanie obrazów z~kamer klatkowych zwiększyło sumę AUC z~$6{,}137$ do $6{,}271$, a~sumę ATE zmniejszyło z~$0{,}863,\mathrm{m}$ do $0{,}448,\mathrm{m}$. Kolejność rozwiązań zależy zatem od rozpatrywanej miary: metoda najlepsza pod względem estymacji prędkości nie uzyskała najmniejszego błędu położenia.
+
+Opracowany system uzyskał sumę AUC równą $4{,}996$, czyli wynik niższy od siedmiu najwyżej sklasyfikowanych metod, ale wyższy od ostatniego zgłoszenia w~rankingu. W~porównaniu ze zwycięskim rozwiązaniem suma AUC była niższa o~$1{,}290$, czyli o~$20{,}5\%$, natomiast suma ATE była większa o~$2{,}837,\mathrm{m}$, a więc ponad trzykrotnie. Jednocześnie suma ATE opracowanego systemu była mniejsza niż dla EVIV oraz ostatniego zgłoszenia. W~porównaniu z~EVIV system dokładniej odtworzył położenie, ale uzyskał słabszy wynik estymacji prędkości. Potwierdza to, że wyznaczanie prędkości jest elementem wymagającym dalszego rozwoju.
+
+Wartości dla opracowanego systemu obliczono za pomocą oficjalnego narzędzia ewaluacyjnego. Jego wiersz w tabeli \ref{tab:evslam_competition_results} nie jest więc oficjalnym zgłoszeniem konkursowym, a~położenia względem wyników rankingu nie należy traktować jako przyznanego miejsca.
+
+\clearpage
+
 \section{Wyniki dla zbioru M3ED}
-% Plan: Podać APE i pomocnicze RPE po jawnie określonej synchronizacji i wyrównaniu, osobno dla wybranych sekwencji. Źródła: oficjalny protokół M3ED, evo, evaluate_m3ed_metrics.py i kompletne outputs. Materiał: tabela metryk, trajektorie 3D i błędy w czasie.
 \label{sec:wyniki_m3ed}
 
-\section{Porównanie konfiguracji i parametrów}
-% Plan: Porównać VO z SLAM-em oraz wpływ BAF, kompensacji, prioru rotacji i długości okna tylko na równych fragmentach danych. Źródła: pary przebiegów z tym samym zakresem i protokołem. Materiał: tabele ablacyjne i wykresy zależności metryki od parametru.
-\label{sec:wyniki_porownanie}
+\subsection{Sekwencje z dostępną trajektorią referencyjną}
+\label{subsec:wyniki_m3ed_gt}
 
-\section{Analiza błędów i ograniczeń}
-% Plan: Omówić utratę śledzenia, błędy głębokości, dryf, fałszywe kandydatury pętli i nieudane relokalizacje na podstawie diagnostyki, bez przypisywania przyczyn bez dowodu. Źródła: logi, mapy, wykresy i kod odpowiedzialny za decyzje. Materiał: reprezentatywne przypadki awarii z osiami czasu.
-\label{sec:analiza_bledow}
+Estymowaną trajektorię i~prędkość w zestawieniu z trajektorią referencyjną dla sekwencji \texttt{falcon\_indoor\_flight\_1} przedstawiono na rysunku~\ref{fig:wyniki_m3ed_indoor_trajectory}.
+
+\begin{table}[!ht]
+    \centering
+    \small
+    \caption{Wyniki pełnych przebiegów dwóch sekwencji M3ED z~dostępną trajektorią referencyjną, w~protokołach określonych w~metodyce.}
+    \label{tab:wyniki_m3ed_gt}
+    \resizebox{\textwidth}{!}{%
+        \begin{tabular}{lrlrrrrr}
+            \toprule
+            Sekwencja & Okno [ms] & Protokół & ATE/APE RMSE [m] & RMSE rotacji [$^\circ$] & AUC & RPE translacji [m] & RPE rotacji [$^\circ$] \\
+            \midrule
+            \texttt{falcon\_indoor\_flight\_1} & 24 & wspólny $SE(3)$ & 0,162 & 4,434 & 0,830 & 0,092 & 0,514 \\
+            \texttt{falcon\_indoor\_flight\_1} & 24 & oficjalny $Sim(3)$ & 0,161 & -- & -- & -- & -- \\
+            \texttt{falcon\_outdoor\_day\_fast\_flight\_2} & 24 & wspólny $SE(3)$ & 25,305 & 47,762 & 0,605 & 2,406 & 4,072 \\
+            \texttt{falcon\_outdoor\_day\_fast\_flight\_2} & 24 & oficjalny $Sim(3)$ & 12,403 & -- & -- & -- & -- \\
+            \bottomrule
+        \end{tabular}%
+    }
+\end{table}
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=0.40\textwidth]{results_m3ed_falcon_indoor_flight_1_first_pose_trajectory_x.png}
+    \includegraphics[width=0.40\textwidth]{results_m3ed_falcon_indoor_flight_1_first_pose_trajectory_y.png}
+    \includegraphics[width=0.40\textwidth]{results_m3ed_falcon_indoor_flight_1_first_pose_trajectory_z.png}
+    \includegraphics[width=0.40\textwidth]{results_m3ed_falcon_indoor_flight_1_first_pose_trajectory_3d.png}
+    \includegraphics[width=0.31\textwidth]{results_m3ed_falcon_indoor_flight_1_first_pose_velocity_x.png}
+    \includegraphics[width=0.31\textwidth]{results_m3ed_falcon_indoor_flight_1_first_pose_velocity_y.png}
+    \includegraphics[width=0.31\textwidth]{results_m3ed_falcon_indoor_flight_1_first_pose_velocity_z.png}
+    \caption{Pełna sekwencja \texttt{falcon\_indoor\_flight\_1}: współrzędne położenia $x$, $y$, $z$, widok 3D oraz składowe prędkości $v_x$, $v_y$ i~$v_z$.}
+    \label{fig:wyniki_m3ed_indoor_trajectory}
+\end{figure}
+
+Graf przebiegu zawiera jedną zaakceptowaną krawędź pętli. Otrzymano pełne pokrycie trajektorii referencyjnej, a~zbliżone wartości ATE po wyrównaniu $SE(3)$ i~APE po $Sim(3)$ wskazują, że dodatkowa korekta skali ma niewielki wpływ na ten wynik.
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=0.40\textwidth]{results_m3ed_falcon_outdoor_day_fast_flight_2_first_pose_trajectory_x.png}
+    \includegraphics[width=0.40\textwidth]{results_m3ed_falcon_outdoor_day_fast_flight_2_first_pose_trajectory_y.png}
+    \includegraphics[width=0.40\textwidth]{results_m3ed_falcon_outdoor_day_fast_flight_2_first_pose_trajectory_z.png}
+    \includegraphics[width=0.40\textwidth]{results_m3ed_falcon_outdoor_day_fast_flight_2_first_pose_trajectory_3d.png}
+    \includegraphics[width=0.31\textwidth]{results_m3ed_falcon_outdoor_day_fast_flight_2_first_pose_velocity_x.png}
+    \includegraphics[width=0.31\textwidth]{results_m3ed_falcon_outdoor_day_fast_flight_2_first_pose_velocity_y.png}
+    \includegraphics[width=0.31\textwidth]{results_m3ed_falcon_outdoor_day_fast_flight_2_first_pose_velocity_z.png}
+    \caption{Pełna sekwencja \texttt{falcon\_outdoor\_day\_fast\_flight\_2} z~oknem 24~ms: współrzędne położenia $x$, $y$, $z$, widok 3D oraz składowe prędkości $v_x$, $v_y$ i~$v_z$.}
+    \label{fig:wyniki_m3ed_fast_flight_2_trajectory}
+\end{figure}
+
+W~sekwencji \texttt{falcon\_outdoor\_day\_fast\_flight\_2} system przetworzył cały przebieg, jednak trajektoria wykazuje znaczny dryf. Potwierdzają to wartości ATE i~APE oraz rozbieżności przebiegów widoczne na rysunku~\ref{fig:wyniki_m3ed_fast_flight_2_trajectory}. Tak słaby wynik pokazuje ograniczenia systemu w~sekwencji zawierającej niewiele charakterystycznych punktów odniesienia, położonych w~dużej odległości od kamer, co znacznie utrudnia poprawne oszacowanie głębi. Dodatkowym utrudnieniem jest brak warunków do wykrycia pętli na trasie drona. Wraca on w~mało charakterystyczne miejsce początkowe dopiero podczas lądowania i~porusza się wtedy bardzo wolno, co ogranicza liczbę generowanych zdarzeń oraz uniemożliwia wykrycie pętli i~korektę trajektorii.
+
+\begin{table}[!ht]
+    \centering
+    \small
+    \caption{Końcowe wyniki konkursu M3ED oraz wyniki opracowanego systemu według tej samej metryki APE RMSE po wyrównaniu $Sim(3)$~\cite{m3ed2025challenge,m3ed2025leaderboard}. W~oficjalnej tabeli wyników konkursu znajdują się tylko dwa zgłoszenia.}
+    \label{tab:m3ed_competition_results}
+    \begin{tabularx}{\textwidth}{X X r}
+        \toprule
+        Metoda & Zakres wyniku & APE RMSE [m] $\downarrow$ \\
+        \midrule
+        NAIL\_SLAM -- Stereo-DEVO & suma dla trzech ukrytych sekwencji konkursowych & 4,84 \\
+        lziupenn -- reconstruction & suma dla trzech ukrytych sekwencji konkursowych & 47,49 \\
+        Opracowany system & \path{falcon_outdoor_day_fast_flight_2}, jedna jawna sekwencja & 12,403 \\
+        Opracowany system & \path{falcon_indoor_flight_1}, jedna jawna sekwencja & 0,161 \\
+        \bottomrule
+    \end{tabularx}
+\end{table}
+
+Wyniki konkursowe przedstawione w~tabeli~\ref{tab:m3ed_competition_results} są sumą błędów trzech innych ukrytych sekwencji, natomiast wartości opracowanego systemu dotyczą pojedynczych sekwencji jawnych. Na ich podstawie trudno oszacować, jaki wynik opracowany system uzyskałby w~konkursie M3ED. Wyniki dla dwóch różnych sekwencji referencyjnych pokazują, że jakość estymacji jest silnie uzależniona od charakterystyki konkretnej sekwencji testowej.
+
+\subsection{Sekwencje bez dostępnej trajektorii referencyjnej}
+\label{subsec:wyniki_m3ed_no_gt}
+
+Do prezentacji jakościowej wybrano pełną sekwencję \texttt{spot\_loop}. Jej trajektoria referencyjna jest ukryta, dlatego tabela~\ref{tab:wyniki_m3ed_no_gt} zawiera wyłącznie informacje o~kompletności oraz diagnostykę zamkniętej trasy. Nie są to miary dokładności.
+
+\begin{table}[!ht]
+    \centering
+    \small
+    \caption{Diagnostyka pełnego przebiegu M3ED \texttt{spot\_loop}.}
+    \label{tab:wyniki_m3ed_no_gt}
+    \begin{tabularx}{0.78\textwidth}{X r}
+        \toprule
+        Wielkość & Wartość \\
+        \midrule
+        status przebiegu & ukończony \\
+        czas przetwarzania & 6741~s (1~h 52 min 21~s) \\
+        liczba zapisanych póz & 2960 \\
+        czas trwania trajektorii & 295,893~s \\
+        oszacowana długość trasy & 292,859~m \\
+        odległość start--koniec & 22,829~m \\
+        odległość start--koniec / długość trasy & 7,80\% \\
+        zaakceptowane domknięcia pętli & 0 \\
+        \bottomrule
+    \end{tabularx}
+\end{table}
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=0.47\textwidth]{results_m3ed_spot_outdoor_day_penno_building_loop_trajectory_x.png}
+    \includegraphics[width=0.47\textwidth]{results_m3ed_spot_outdoor_day_penno_building_loop_trajectory_y.png}
+    \includegraphics[width=0.47\textwidth]{results_m3ed_spot_outdoor_day_penno_building_loop_trajectory_z.png}
+    \includegraphics[width=0.47\textwidth]{results_m3ed_spot_outdoor_day_penno_building_loop_trajectory_3d.png}
+    \caption{Estymowana trajektoria pełnej sekwencji M3ED \texttt{spot\_loop}: współrzędne $x$, $y$, $z$ i~widok 3D. Przedstawion wyłącznie trajektorię obliczoną przez opracowany system, ponieważ trajektoria referencyjna dla tej sekwencji nie jest dostępna.}
+    \label{fig:wyniki_m3ed_no_gt_trajectory}
+\end{figure}
+
+Przebieg objął całe 295,9~s danych i~utworzył 2\,212 klatek kluczowych oraz 33\,554 punkty mapy. Trajektorię pokazano na rysunku~\ref{fig:wyniki_m3ed_no_gt_trajectory}. System nie zaakceptował domknięcia pętli, a~końcowa odległość od punktu startu odpowiada 7,80\% długości estymowanej trasy. Wynik potwierdza wykonanie pełnego przebiegu, ale bez GT nie pozwala określić błędu trajektorii.
+
+\clearpage
+
+\section{Ocena działania systemu}
+\label{sec:wnioski}
+
+\subsection{Wyniki końcowe}
+
+Dla siedmiu sekwencji EvSLAM uzyskano średnie pokrycie trajektorii referencyjnej równe $99{,}6\%$, średnie ATE RMSE wynoszące $0{,}522\,\mathrm{m}$ i~średnie AUC równe $0{,}714$. Najmniejszy błąd położenia wystąpił dla ruchu liniowego w~\texttt{seq005} i~wyniósł $0{,}077\,\mathrm{m}$, natomiast największe błędy uzyskano w~\texttt{seq001} i~\texttt{seq007}. W~porównaniu z~metodami zestawionymi w~tabeli~\ref{tab:evslam_sota_comparison} średnie ATE było mniejsze niż dla EVIV, ale większe niż dla FETAP, SuperEvent* i~SDEVO, przy czym metody te korzystają z~różnych zestawów czujników. Niższe AUC wskazuje, że wyznaczanie prędkości pozostaje słabszym elementem rozwiązania. Pełne wyniki zawiera tabela~\ref{tab:wyniki_evslam_final}.
+
+Wyniki M3ED zależały od scenariusza. Dla \texttt{falcon\_indoor\_flight\_1} uzyskano ATE RMSE równe $0{,}162\,\mathrm{m}$ po wyrównaniu $SE(3)$. Dla zarejestrowanej na zewnątrz sekwencji \texttt{falcon\_outdoor\_day\_fast\_flight\_2} wartości ATE RMSE i~APE RMSE wyniosły odpowiednio $25{,}305\,\mathrm{m}$ i~$12{,}403\,\mathrm{m}$, co potwierdza znaczny dryf podczas szybkiego lotu z~odległymi punktami odniesienia. Wyniki obu przebiegów przedstawiono w~tabeli~\ref{tab:wyniki_m3ed_gt}. System przetworzył także całe $295{,}9\,\mathrm{s}$ sekwencji \texttt{spot\_loop}, lecz nie wykrył w~niej pętli. Ze względu na brak trajektorii referencyjnej wynik ten potwierdza jedynie kompletność przebiegu, a~nie jego dokładność.
+
+\subsection{Wpływ badanych parametrów na wynik}
+
+Na wspólnym fragmencie \texttt{seq007\_test} zastosowanie mapy i~korekty grafu zmniejszyło ATE RMSE z~$0{,}544\,\mathrm{m}$ do $0{,}151\,\mathrm{m}$, a~RMSE rotacji z~$16{,}256^\circ$ do $3{,}179^\circ$. Nie poprawiły się AUC ani translacyjny RPE, co oznacza, że warstwa SLAM ograniczała przede wszystkim globalny dryf pozycji~(tabela~\ref{tab:wyniki_slam_vo}). Dla \texttt{falcon\_indoor\_flight\_1} przyjęcie rotacji z~żyroskopu zamiast pełnej estymacji PnP zmniejszyło ATE z~$0{,}240\,\mathrm{m}$ do $0{,}162\,\mathrm{m}$ i~RMSE rotacji z~$9{,}885^\circ$ do $4{,}434^\circ$, co uzasadnia wybór tego wariantu w~konfiguracji końcowej~(tabela~\ref{tab:wyniki_rotation_source}).
+
+W~badanych fragmentach filtr BAF poprawiał część miar, ale jego koszt zależał od gęstości strumienia zdarzeń. Wydłużył czas badanego fragmentu EvSLAM o~$7{,}2\%$, a~M3ED o~$207{,}5\%$, dlatego dla M3ED został wyłączony~(tabela~\ref{tab:wyniki_baf}). Korzystny czas akumulacji również zależał od danych: dla szybkiego ruchu ramienia EvSLAM najlepsze ATE uzyskano przy $6\,\mathrm{ms}$, a~najwyższe AUC przy $12\,\mathrm{ms}$, natomiast na badanym fragmencie M3ED większość miar poprawiała się do $48\,\mathrm{ms}$. W~konfiguracji końcowej przyjęto odpowiednio $12\,\mathrm{ms}$ i~$24\,\mathrm{ms}$~(tabela~\ref{tab:wyniki_accumulation}).
+
+\subsection{Ograniczenia}
+
+Największy dryf wystąpił w~zewnętrznej sekwencji M3ED, w~której dominowały odległe elementy sceny. Mała dysparycja odpowiadająca takim punktom zwiększała niepewność głębokości, a~tym samym również niepewność translacji wyznaczanej na podstawie punktów 3D. W~tym przebiegu oraz w~sekwencji \texttt{spot\_loop} nie wykryto żadnej pętli, mimo powrotu robota w~okolice początku drugiej z~nich. Wskazuje to na ograniczoną odporność rozpoznawania miejsc na zmianę punktu widzenia i~niewielką aktywność zdarzeń.
+
+Ograniczenia ujawniły się również w~sekwencjach EvSLAM. Podczas postoju lub wolnego ruchu mała liczba zdarzeń utrudniała wyznaczenie punktów 3D i~utworzenie wystarczającej liczby korespondencji PnP. Na początku kilku sekwencji opóźniało to rozpoczęcie poprawnej estymacji i~powodowało błąd początkowego fragmentu trajektorii, na przykład w~\texttt{seq006}.
+
+W~\texttt{seq007} zaobserwowano ponadto wyraźne zaniżenie skali translacji, widoczne na rysunku~\ref{fig:evslam_seq007_trajectory}. Prawdopodobną przyczyną jest wrażliwość estymacji na błędy dopasowania stereo: zawyżona dysparycja prowadzi do zaniżenia głębokości punktów.
+
+System nie estymuje błędów systematycznych IMU ani prędkości jako części stanu. Bezpośrednie wykorzystanie żyroskopu poprawiło wynik kontrolowanego porównania, ale może przenosić jego dryf do trajektorii. Ograniczeniem pozostaje również wydajność. Nie oceniano osobno czasu wykonania poszczególnych sekwencji, jednak system nie jest zoptymalizowany pod kątem wydajności obliczeniowej, a~przetwarzanie obszernych sekwencji trwa stosunkowo długo.

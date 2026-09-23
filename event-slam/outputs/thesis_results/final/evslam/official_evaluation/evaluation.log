@@ -1,0 +1,51 @@
+============================================================
+EvSLAM Evaluation Toolkit
+============================================================
+
+[1/3] Processing submissions...
+  Processing 7 sequence(s) with GT data...
+  [seq001] OK — 409 poses, 409 velocity pairs
+  [seq002] OK — 388 poses, 388 velocity pairs
+  [seq003] OK — 410 poses, 410 velocity pairs
+  [seq004] OK — 333 poses, 333 velocity pairs
+  [seq005] OK — 126 poses, 126 velocity pairs
+  [seq006] OK — 267 poses, 267 velocity pairs
+  [seq007] OK — 359 poses, 359 velocity pairs
+
+[2/3] Computing ATE...
+  seq001: ATE = 0.9015
+  seq002: ATE = 0.7803
+  seq003: ATE = 0.3334
+  seq004: ATE = 0.6490
+  seq005: ATE = 0.0773
+  seq006: ATE = 0.1115
+  seq007: ATE = 0.8014
+  Total ATE: 3.6543
+
+[3/3] Computing AUC...
+Loaded 409 entries from outputs/thesis_experiments/01_evslam_final/official_evaluation/seq001_auc.txt
+Loaded 388 entries from outputs/thesis_experiments/01_evslam_final/official_evaluation/seq002_auc.txt
+Loaded 410 entries from outputs/thesis_experiments/01_evslam_final/official_evaluation/seq003_auc.txt
+Loaded 333 entries from outputs/thesis_experiments/01_evslam_final/official_evaluation/seq004_auc.txt
+Loaded 126 entries from outputs/thesis_experiments/01_evslam_final/official_evaluation/seq005_auc.txt
+Loaded 267 entries from outputs/thesis_experiments/01_evslam_final/official_evaluation/seq006_auc.txt
+Loaded 359 entries from outputs/thesis_experiments/01_evslam_final/official_evaluation/seq007_auc.txt
+Saved PDF: outputs/thesis_experiments/01_evslam_final/official_evaluation/S_xi_result.pdf
+  seq001: AUC = 0.820986
+  seq002: AUC = 0.828022
+  seq003: AUC = 0.852154
+  seq004: AUC = 0.756634
+  seq005: AUC = 0.799515
+  seq006: AUC = 0.505543
+  seq007: AUC = 0.433108
+  Total AUC: 4.995963
+
+============================================================
+Summary
+============================================================
+  Passed:  7 sequences
+  ATE:     3.6543 m (7 seqs)
+  AUC:     4.995963 (7 seqs)
+  Scores:  outputs/thesis_experiments/01_evslam_final/official_evaluation/scores.json
+  S_xi:    outputs/thesis_experiments/01_evslam_final/official_evaluation/S_xi_result.pdf
+============================================================

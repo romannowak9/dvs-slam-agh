@@ -1,0 +1,109 @@
+dataset:
+  bag_path: /data/evSLAM/seq006.bag
+  left_event_topic: /dvxplorer_left/events
+  right_event_topic: /dvxplorer_right/events
+  camera_yaml: /data/evSLAM/arm_calibration/calib_results_cam_others.yaml
+  reference_timestamps_path: outputs/thesis_experiments_window24/00_configs/references/seq006_ref_005_020.txt
+imu:
+  enabled: true
+  calibration_yaml: /data/evSLAM/arm_calibration/calib_results_imu_others.yaml
+  topic: /dvxplorer_left/imu
+  motion_compensation:
+    enabled: true
+    reference_time: middle
+    time_bins: 32
+  rotation_prior:
+    enabled: true
+    max_error_deg: 5.0
+    reject_bad_pnp: true
+    use_for_pose: true
+processing:
+  time_window: 0.012
+  t_start: 1750927643.5
+  t_end: 1750927658.5
+  num_frames: 0
+aggregation:
+  mode: exponential
+  polarity_mode: both
+  tau: 0.012
+baf:
+  enabled: true
+  time_window: 0.01
+  radius: 2
+  min_neighbors: 5
+rectification:
+  alpha: 0.0
+  interpolation: nearest
+feature_tracker:
+  detector: gftt
+  max_features: 1000
+  fast_threshold: 25
+  forward_backward_check: false
+  fb_threshold: 1.0
+stereo_depth:
+  epipolar_threshold: 2.0
+  lr_consistency_threshold: 1.0
+  min_disparity: 0.5
+  max_disparity: 250.0
+  min_depth: 0.05
+  max_depth: 10.0
+pnp:
+  min_pnp_points: 15
+  min_pnp_inliers: 15
+  min_pnp_inlier_ratio: 0.25
+  max_pnp_reprojection_median: 2.5
+  max_translation_step: 0.2
+  max_rotation_step_deg: 15.0
+  pnp_reprojection_error: 3.0
+  pnp_confidence: 0.999
+  pnp_iterations: 100
+  R_output_from_pnp_camera:
+  - - 1.0
+    - 0.0
+    - 0.0
+  - - 0.0
+    - 1.0
+    - 0.0
+  - - 0.0
+    - 0.0
+    - 1.0
+slam:
+  enabled: true
+  min_frame_gap: 5
+  translation_depth_ratio: 0.15
+  rotation_deg: 10.0
+  tracked_landmark_ratio: 0.6
+  max_landmark_depth: 10.0
+  local_keyframes: 5
+  descriptor_ratio: 0.75
+  reprojection_gate_px: 8.0
+  loop_closure:
+    enabled: true
+    min_keyframe_gap: 50
+    min_keyframes_between_loops: 30
+    descriptor_ratio: 0.75
+    min_matches: 50
+    max_candidates: 3
+    min_inliers: 25
+    min_inlier_ratio: 0.4
+    max_reprojection_median: 2.0
+  pose_graph:
+    translation_weight: 1.0
+    rotation_weight: 1.0
+    huber_scale: 1.0
+    max_evaluations: 100
+  relocalization:
+    enabled: true
+    failure_count: 3
+velocity:
+  enabled: true
+  output_csv: velocity.csv
+  smoothing_window: 41
+  smoothing_poly_order: 2
+output:
+  output_dir: outputs/thesis_experiments_window24/02_ablations/accumulation/evslam/window_012
+  trajectory_csv: trajectory.csv
+  result_txt: result_seq006.txt
+  keyframes_csv: keyframes.csv
+  landmarks_csv: landmarks.csv
+  pose_graph_csv: pose_graph.csv

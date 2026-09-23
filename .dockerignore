@@ -1,0 +1,8 @@
+.git
+**/__pycache__
+**/*.pyc
+EvSLAM_Dataset
+event-slam/outputs
+latex
+pose-estimation
+sota

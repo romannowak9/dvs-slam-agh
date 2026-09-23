@@ -25,24 +25,34 @@ from plot_trajectory import (
 def main() -> None:
     args = parse_args()
     estimate = load_plot_data(args.trajectory, "estimated")
-    ground_truth = trim_to_estimate(
-        load_plot_data(args.gt, "ground truth"),
-        estimate,
-    )
+    ground_truth = None
+    if args.gt is not None:
+        ground_truth = trim_to_estimate(
+            load_plot_data(args.gt, "ground truth"),
+            estimate,
+        )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     time_origin = 0.0 if args.absolute_time else estimate.timestamps[0]
     xlabel = "Timestamp [s]" if args.absolute_time else "Time from start [s]"
 
     components = (
-        ("x", estimate.positions[:, 0], ground_truth.positions[:, 0], "Trajectory x(t)", "x [m]"),
-        ("y", estimate.positions[:, 1], ground_truth.positions[:, 1], "Trajectory y(t)", "y [m]"),
-        ("z", estimate.positions[:, 2], ground_truth.positions[:, 2], "Trajectory z(t)", "z [m]"),
-        ("vx", estimate.velocities_camera[:, 0], ground_truth.velocities_camera[:, 0], "Camera velocity vx(t)", "vx [m/s]"),
-        ("vy", estimate.velocities_camera[:, 1], ground_truth.velocities_camera[:, 1], "Camera velocity vy(t)", "vy [m/s]"),
-        ("vz", estimate.velocities_camera[:, 2], ground_truth.velocities_camera[:, 2], "Camera velocity vz(t)", "vz [m/s]"),
-        ("speed", estimate.speeds, ground_truth.speeds, "Camera speed(t)", "speed [m/s]"),
+        ("x", estimate.positions[:, 0], "position", 0, "Trajectory x(t)", "x [m]"),
+        ("y", estimate.positions[:, 1], "position", 1, "Trajectory y(t)", "y [m]"),
+        ("z", estimate.positions[:, 2], "position", 2, "Trajectory z(t)", "z [m]"),
+        ("vx", estimate.velocities_camera[:, 0], "velocity", 0, "Camera velocity vx(t)", "vx [m/s]"),
+        ("vy", estimate.velocities_camera[:, 1], "velocity", 1, "Camera velocity vy(t)", "vy [m/s]"),
+        ("vz", estimate.velocities_camera[:, 2], "velocity", 2, "Camera velocity vz(t)", "vz [m/s]"),
+        ("speed", estimate.speeds, "speed", 0, "Camera speed(t)", "speed [m/s]"),
     )
-    for suffix, estimate_values, gt_values, title, ylabel in components:
+    for suffix, estimate_values, value_kind, index, title, ylabel in components:
+        gt_values = None
+        if ground_truth is not None:
+            if value_kind == "position":
+                gt_values = ground_truth.positions[:, index]
+            elif value_kind == "velocity":
+                gt_values = ground_truth.velocities_camera[:, index]
+            else:
+                gt_values = ground_truth.speeds
         plot_component(
             estimate,
             ground_truth,
@@ -98,7 +108,11 @@ def trim_to_estimate(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Plot an M3ED trajectory and GT.")
     parser.add_argument("--trajectory", required=True, type=Path)
-    parser.add_argument("--gt", required=True, type=Path)
+    parser.add_argument(
+        "--gt",
+        type=Path,
+        help="Optional ground-truth trajectory. Omit it for test sequences without GT.",
+    )
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--prefix", default="trajectory")
     parser.add_argument("--absolute-time", action="store_true")

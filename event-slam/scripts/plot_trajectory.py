@@ -186,6 +186,7 @@ def main() -> None:
             estimated=estimated,
             ground_truth=ground_truth,
             output_path=output_dir / f"{args.prefix}_3d.{args.format}",
+            axis_order=(0, 2, 1),
         )
     )
 
@@ -369,6 +370,10 @@ def plot_trajectory_3d(
         all_positions = np.vstack((all_positions, gt_positions))
 
     set_axes_equal_3d(ax, all_positions)
+    # Show the vertical coordinate in the intuitive direction: take-off goes
+    # upwards and landing goes downwards.  This changes only the view, not the
+    # trajectory data used for metrics or written to disk.
+    ax.invert_zaxis()
 
     ax.grid(True, linewidth=0.5, alpha=0.4)
     ax.legend()
@@ -376,6 +381,52 @@ def plot_trajectory_3d(
     fig.tight_layout()
     fig.savefig(output_path, dpi=160, bbox_inches="tight")
     plt.close(fig)
+
+    top_output_path = output_path.with_name(
+        f"{output_path.stem}_top{output_path.suffix}"
+    )
+    top_fig, top_ax = plt.subplots(figsize=(8.0, 7.0))
+    top_ax.plot(
+        estimated_positions[:, 0],
+        estimated_positions[:, 1],
+        color="C0",
+        linewidth=1.5,
+        label=estimated.label,
+    )
+    if gt_positions is not None:
+        top_ax.plot(
+            gt_positions[:, 0],
+            gt_positions[:, 1],
+            color="C1",
+            linewidth=1.2,
+            linestyle="--",
+            label=ground_truth.label,
+        )
+    top_ax.scatter(
+        estimated_positions[0, 0],
+        estimated_positions[0, 1],
+        color="C0",
+        marker="o",
+        label="start",
+        zorder=3,
+    )
+    top_ax.scatter(
+        estimated_positions[-1, 0],
+        estimated_positions[-1, 1],
+        color="C0",
+        marker="x",
+        label="end",
+        zorder=3,
+    )
+    top_ax.set_title("Trajectory - top view")
+    top_ax.set_xlabel(labels[0])
+    top_ax.set_ylabel(labels[1])
+    top_ax.set_aspect("equal", adjustable="box")
+    top_ax.grid(True, linewidth=0.5, alpha=0.4)
+    top_ax.legend()
+    top_fig.tight_layout()
+    top_fig.savefig(top_output_path, dpi=160, bbox_inches="tight")
+    plt.close(top_fig)
 
     return output_path
 

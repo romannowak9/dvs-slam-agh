@@ -1,0 +1,11 @@
+M3ED diagnostics without ground truth
+trajectory: outputs/thesis_experiments_window24/03_m3ed_final/spot_outdoor_day_penno_building_loop/spot_outdoor_day_penno_building_loop.txt
+sample_count: 2960
+duration_s: 295.892622000
+estimated_path_length_m: 292.858869893
+start_end_translation_gap_m: 22.829173035
+start_end_gap_to_path_length: 0.077952814
+pose_graph_loop_edge_count: 0
+accepted_loop_count: 0
+frames_with_loop_candidates: 2059
+interpretation: endpoint closure and accepted loops are diagnostics, not accuracy metrics without GT

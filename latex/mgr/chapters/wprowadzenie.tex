@@ -1,15 +1,40 @@
 \chapter{Wprowadzenie}
-% Plan: Uzasadnić potrzebę estymacji stanu z danych zdarzeniowych, określić cel i granice pracy oraz zapowiedzieć jej układ. Źródła: survey kamer zdarzeniowych, Cadena i oficjalne opisy konkursów. Materiał: schemat kontekstu zastosowania lub krótka tabela zakresu.
 \label{cha:wprowadzenie}
 
-\section{Motywacja}
-% Plan: Wyjaśnić znaczenie estymacji stanu robota i cechy kamer zdarzeniowych istotne przy szybkim ruchu oraz trudnym oświetleniu. Źródła: zweryfikowany survey kamer zdarzeniowych i Cadena. Materiał: rysunek porównujący próbki kamery klatkowej i strumień zdarzeń.
-\label{sec:motywacja}
+Estymacja stanu jest jednym z~podstawowych zadań systemu percepcji robota mobilnego. Informacja o~pozycji, orientacji i~prędkości jest potrzebna między innymi do planowania ruchu, nawigacji, stabilizacji platformy oraz tworzenia mapy otoczenia. Pozwala ona określić, gdzie znajduje się robot, w~jakim kierunku jest zwrócony i~jak zmienia się jego położenie. Bez dostatecznie dokładnego oszacowania tych wielkości nie jest możliwe wiarygodne odnoszenie obserwacji czujników do otoczenia ani bezpieczne wykonywanie zaplanowanego ruchu.
 
-\section{Cel i zakres pracy}
-% Plan: Podać formalny cel, zakres opracowanego stereo VO/SLAM-u oraz użycie żyroskopu; zaznaczyć działanie offline i brak pełnego VIO, kamery klasycznej oraz gwarancji czasu rzeczywistego. Źródła: kod event-slam, konfiguracje eksperymentów i treść tematu. Materiał: tabela celów, rezultatów i elementów poza zakresem.
+Położenie robota może być wyznaczane przez zewnętrzne systemy lokalizacji, takie jak globalne systemy nawigacji satelitarnej (GNSS, ang. \textit{Global Navigation Satellite System}), lub infrastrukturę rozmieszczoną w środowisku. Rozwiązania te nie zawsze są jednak dostępne. Sygnał GNSS może zanikać wewnątrz budynków, pomiędzy wysokimi obiektami lub pod ziemią, a jego precyzja jest ograniczona, natomiast specjalna infrastruktura pozwala na ruch robota tylko w ściśle określonym obszarze. W~takich warunkach ruch można wyznaczać na podstawie obserwacji z~czujników pokładowych. Odometria pozwala śledzić kolejne zmiany położenia, a~system SLAM dodatkowo tworzy mapę i~wykorzystuje ją do lokalizacji~\cite{cadena2016slam}. Takie rozwiązanie może uzupełniać zewnętrzne źródło pozycji, czasowo je zastępować lub stanowić samodzielny mechanizm estymacji położenia i prędkości.
+
+Kamery są atrakcyjnym źródłem danych dla pokładowego systemu lokalizacji, ponieważ dostarczają informacji o~strukturze obserwowanej sceny bez konieczności modyfikowania otoczenia. Ruch kamery można wyznaczać na podstawie zmian położenia tych samych elementów sceny w~kolejnych obserwacjach. Jakość takiej estymacji zależy jednak od czytelności obrazu. Szybki ruch może powodować jego rozmycie, natomiast duże różnice oświetlenia utrudniają jednoczesną obserwację jasnych i~ciemnych fragmentów sceny.
+
+Kamery zdarzeniowe rejestrują zmiany jasności niezależnie dla poszczególnych pikseli. Wysoka rozdzielczość czasowa, małe opóźnienie i~duża rozpiętość tonalna czynią je interesującym źródłem danych podczas szybkiego ruchu oraz przy trudnym oświetleniu~\cite{gallego2022event}. Ich wyjściem jest jednak asynchroniczny strumień zdarzeń, a~nie gotowe obrazy. Opracowanie systemu lokalizacji wymaga zatem dobrania reprezentacji danych i~metod estymacji ruchu odpowiednich dla tego formatu.
+
+Zastosowanie pary kamer pozwala wyznaczać głębokość obserwowanych punktów i~skalę metryczną ruchu na podstawie geometrii stereo~\cite{hartley2004multiple}. Informacja o~prędkości kątowej z~żyroskopu dostarcza natomiast niezależnej obserwacji ruchu obrotowego i~może wspierać przetwarzanie podczas szybkich zmian orientacji~\cite{kneip2011gyro}. Połączenie tych czujników umożliwia wykorzystanie zalet kamer zdarzeniowych, a~jednocześnie dostarcza informacji potrzebnych do wyznaczania przestrzennego ruchu robota.
+
+Opracowany system realizuje zdanie estymacji stanu przez obliczanie trajektorii położenia i prędkości. Może stanowić źródło informacji o~ruchu dla dalszych elementów systemu robota, takich jak nawigacja lub planowanie trajektorii, szczególnie w~warunkach ograniczonej dostępności zewnętrznych metod lokalizacji.
+
+\section{Cel i zakres projektu}
 \label{sec:cel_i_zakres}
 
+Głównym celem projektu jest zaprojektowanie, zaimplementowanie i~przygotowanie do ewaluacji systemu wyznaczającego ruch robota na podstawie dwóch kamer zdarzeniowych, zdolnego do przetworzenia danych z publicznie dostępnych zbiorów danych, udostępnionych w ramach międzynarodowych konkursów badawczych: CVPR 2025 Workshop on Event-based Vision -- SLAM Challenge \cite{evslam2025challenge} (dalej opisywanym jako evSLAM) oraz IROS 2025 EvSLAM Challenge -- A Challenge on Event-based State Estimation for High-Speed Maneuvers \cite{m3ed2025challenge} (dalej opisywanym jako m3ed Challenge). Powstałe rozwiązanie realizuje odometrię wizyjną (ang. \textit{visual odometry}, VO), rozszerzoną o mechanizmy rzadkiego systemu jednoczesnej lokalizacji i~mapowania (ang. \textit{simultaneous localization and mapping}, SLAM).
+
+Jako pierwszy etap pracy zrealizowany został przegląd literatury, ze szczególnym uwzględnieniem kamer zdarzeniowych, estymacji pozycji, metod VO oraz SLAM dostosowanych do danych asynchronicznych. Pozwoliło to na wybranie sposobu rozwiązania problemu. Drugim etapem była implementacja algorytmu.
+
+Wymagane funkcjonalności systemu:
+\begin{itemize}
+    \item odczyt, kalibracja i~synchronizacja strumieni zdarzeń;
+    \item utworzenie obrazowych reprezentacji zdarzeń oraz rektyfikację pary stereo;
+    \item detekcja i~śledzenie cech, wyznaczanie głębokości oraz estymacja pozy kamery;
+    \item opcjonalne wykorzystanie danych z IMU (ang. \textit{inertial measurment unit}) do wspomagania działania systemu;
+    \item utrzymywanie mapy otoczenia, rozpoznawanie miejsc, domykanie pętli i~optymalizacja grafu pozy;
+    \item zapis trajektorii, prędkości wyznaczonej z~kolejnych póz oraz mapy w~formatach umożliwiających ocenę na obu zbiorach.
+\end{itemize}
+
+System nie wykorzystuje kamery klatkowej, mimo że taki czujnik jest dostępny w ramach przyjętych zbiorów danych. Celem pracy jest skupienie się na kamerach zdarzeniowych i próba wykorzystania ich możliwości.
+
+Trzecim i ostatnim etapem jest zebranie wyników oraz ich ewaluacja. Wydajność rozwiązania zostala oceniona przy użyciu standardowych metryk takich jak: ATE (ang. absolute trajectory error), RMSE (ang. root mean squared error) oraz RPE (ang. relative pose error). Wyniki zostały przedstawione na wykresach umożliwiających wizualną ocenę jakości działania systemu.
+
 \section{Zawartość pracy}
-% Plan: Krótko omówić rolę kolejnych rozdziałów i zależność między teorią, implementacją a ewaluacją. Źródła: ostateczny spis treści. Materiał: bez rysunku, ewentualnie jednozdaniowa mapa rozdziałów.
 \label{sec:zawartosc_pracy}
+
+W~rozdziale \ref{cha:podstawy_teoretyczne} wyjaśniono podstawowe pojęcia używane w~tekście pracy i~metody wykorzystywane w implementacji systemu. W~rozdziale~\ref{cha:przeglad_literatury} omówiono istniejące rozwiązania VO, VIO i~SLAM. Rozdział~\ref{cha:projekt_systemu} opisuje założenia i~architekturę opracowanego systemu, natomiast rozdział ~\ref{cha:implementacja} jego realizację programową. Metodykę eksperymentów określono w~rozdziale~\ref{cha:metodyka_badan}, ich wyniki przedstawiono w~rozdziale~\ref{cha:wyniki}, a~wnioski i~ograniczenia rozwiązania zebrano w~rozdziale~\ref{cha:podsumowanie}.

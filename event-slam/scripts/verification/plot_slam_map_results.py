@@ -27,7 +27,6 @@ def main() -> None:
     args = parse_args()
     output_dir = args.output_dir or args.results_dir / "slam_plots"
 
-    trajectory = _read_csv(args.results_dir / "trajectory.csv")
     keyframes = _read_csv(args.results_dir / "keyframes.csv")
     landmarks = _read_csv(args.results_dir / "landmarks.csv")
 
@@ -41,25 +40,32 @@ def main() -> None:
         path=output_dir / "map_3d.png",
         max_plot_distance=args.max_plot_distance,
     )
-    tracking_path = save_tracking_diagnostics_plot(
-        track_counts=_values(trajectory, "track_count", int),
-        new_feature_counts=_values(trajectory, "new_feature_count", int),
-        map_point_counts=_values(trajectory, "map_point_count", int),
-        map_inlier_counts=_values(trajectory, "map_inlier_count", int),
-        pnp_inlier_counts=_values(trajectory, "pnp_inlier_count", int),
-        pose_sources=_values(trajectory, "pose_source", str),
-        descriptor_match_counts=_values(
-            trajectory, "map_descriptor_match_count", int
-        ),
-        loop_accepted=_values(trajectory, "loop_accepted", int),
-        path=output_dir / "tracking_diagnostics.png",
-    )
+    tracking_path = None
+    frame_count = None
+    if not args.map_only:
+        trajectory = _read_csv(args.results_dir / "trajectory.csv")
+        frame_count = len(trajectory)
+        tracking_path = save_tracking_diagnostics_plot(
+            track_counts=_values(trajectory, "track_count", int),
+            new_feature_counts=_values(trajectory, "new_feature_count", int),
+            map_point_counts=_values(trajectory, "map_point_count", int),
+            map_inlier_counts=_values(trajectory, "map_inlier_count", int),
+            pnp_inlier_counts=_values(trajectory, "pnp_inlier_count", int),
+            pose_sources=_values(trajectory, "pose_source", str),
+            descriptor_match_counts=_values(
+                trajectory, "map_descriptor_match_count", int
+            ),
+            loop_accepted=_values(trajectory, "loop_accepted", int),
+            path=output_dir / "tracking_diagnostics.png",
+        )
 
-    print(f"frames: {len(trajectory)}")
+    if frame_count is not None:
+        print(f"frames: {frame_count}")
     print(f"keyframes: {len(keyframes)}")
     print(f"landmarks: {len(landmarks)}")
     print(f"map_plot: {map_path}")
-    print(f"tracking_plot: {tracking_path}")
+    if tracking_path is not None:
+        print(f"tracking_plot: {tracking_path}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -68,7 +74,19 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("results_dir", type=Path)
     parser.add_argument("--output-dir", type=Path)
-    parser.add_argument("--max-plot-distance", default=5.0, type=float)
+    parser.add_argument(
+        "--map-only",
+        action="store_true",
+        help="Regenerate only map_3d.png and leave tracking diagnostics unchanged.",
+    )
+    parser.add_argument(
+        "--max-plot-distance",
+        type=float,
+        help=(
+            "Optionally show only landmarks within this distance of their "
+            "anchor camera. By default all stored landmarks are plotted."
+        ),
+    )
     return parser.parse_args()
 
 

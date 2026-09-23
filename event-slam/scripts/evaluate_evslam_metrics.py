@@ -17,7 +17,12 @@ if SRC_PATH.exists():
 
 from event_slam.io.result_io import load_evslam_result_array
 from event_slam.core.trajectory import Trajectory
-from trajectory_metrics import compute_pose_metrics, match_timestamps
+from align_evslam_result_to_gt import apply_world_alignment, estimate_se3_alignment
+from trajectory_metrics import compute_pose_metrics
+
+EVSLAM_XI_MIN = 0.0
+EVSLAM_XI_MAX = 1.0
+EVSLAM_XI_COUNT = 500
 
 
 @dataclass
@@ -27,16 +32,11 @@ class EvSlamMetrics:
     """
 
     sample_count: int
-    ate: float
+    position_mean: float
     ate_rmse: float
-    ate_median: float
-    ate_max: float
+    position_median: float
+    position_max: float
     auc: float
-    auc_normalized: float
-    mean_rve: float
-    median_rve: float
-    max_rve: float
-    rve_sample_count: int
     rotation_rmse_deg: float
     rpe_pair_count: int
     rpe_delta_median_s: float
@@ -52,7 +52,7 @@ def main() -> None:
 
     estimate_count = len(estimate)
     gt_count = len(ground_truth)
-    estimate_indices, gt_indices = match_timestamps(
+    estimate_indices, gt_indices = match_evslam_timestamps(
         estimate[:, 0],
         ground_truth[:, 0],
         args.timestamp_tolerance,
@@ -63,11 +63,8 @@ def main() -> None:
     metrics = compute_metrics(
         estimate=estimate,
         ground_truth=ground_truth,
-        xi_min=args.xi_min,
-        xi_max=args.xi_max,
-        xi_count=args.xi_count,
-        min_speed=args.min_speed,
         rpe_delta_seconds=args.rpe_delta_seconds,
+        alignment=args.alignment,
     )
 
     write_metrics(
@@ -75,22 +72,21 @@ def main() -> None:
         output_path=args.output,
         estimate_path=args.estimate,
         ground_truth_path=args.gt,
-        xi_min=args.xi_min,
-        xi_max=args.xi_max,
-        xi_count=args.xi_count,
         rpe_delta_seconds=args.rpe_delta_seconds,
         estimate_count=estimate_count,
         gt_count=gt_count,
+        alignment=args.alignment,
+        timestamp_tolerance=args.timestamp_tolerance,
     )
 
-    print_metrics(metrics)
+    print_metrics(metrics, args.alignment)
     print()
     print(f"Saved metrics: {args.output}")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compute EvSLAM ATE and velocity AUC metrics."
+        description="Compute EvSLAM ATE, AUC, RMSE, and RPE with the official protocol."
     )
     parser.add_argument("--estimate", required=True, type=Path)
     parser.add_argument("--gt", required=True, type=Path)
@@ -99,30 +95,64 @@ def parse_args() -> argparse.Namespace:
         default=Path("outputs/evslam_metrics.txt"),
         type=Path,
     )
-    parser.add_argument("--xi-min", default=0.0, type=float)
-    parser.add_argument("--xi-max", default=1.0, type=float)
-    parser.add_argument("--xi-count", default=1001, type=int)
-    parser.add_argument("--min-speed", default=1e-6, type=float)
-    parser.add_argument("--timestamp-tolerance", default=1e-6, type=float)
+    parser.add_argument("--timestamp-tolerance", default=1e-3, type=float)
     parser.add_argument("--rpe-delta-seconds", default=1.0, type=float)
+    parser.add_argument(
+        "--alignment",
+        choices=("se3", "none"),
+        default="se3",
+        help="Use official rigid Umeyama alignment or evaluate an already aligned trajectory.",
+    )
     return parser.parse_args()
 
 
 def compute_metrics(
     estimate: np.ndarray,
     ground_truth: np.ndarray,
-    xi_min: float,
-    xi_max: float,
-    xi_count: int,
-    min_speed: float,
     rpe_delta_seconds: float,
+    alignment: str,
 ) -> EvSlamMetrics:
     """
-    Compute ATE and speed-weighted RVE AUC.
+    Compute pose errors and the speed-weighted AUC used by EvSLAM.
     """
+    estimate_trajectory = Trajectory.from_tum_array(estimate[:, :8])
+    ground_truth_trajectory = Trajectory.from_tum_array(ground_truth[:, :8])
+    if alignment == "se3":
+        # The official evaluator serializes matched poses with six decimal
+        # places before applying rigid Umeyama alignment.  Reproduce that
+        # detail so ATE agrees down to its numerical precision.
+        estimate_positions = np.round(estimate[:, 1:4], decimals=6)
+        ground_truth_positions = np.round(ground_truth[:, 1:4], decimals=6)
+        T_gt_est = estimate_se3_alignment(
+            estimate_positions,
+            ground_truth_positions,
+        )
+        evaluated_trajectory = apply_world_alignment(
+            estimate_trajectory,
+            T_gt_est,
+            scale=1.0,
+        )
+        R_gt_est = T_gt_est[:3, :3]
+        t_gt_est = T_gt_est[:3, 3]
+        aligned_positions = (R_gt_est @ estimate_positions.T).T + t_gt_est
+        official_position_error = np.linalg.norm(
+            aligned_positions - ground_truth_positions,
+            axis=1,
+        )
+        ate_rmse = float(np.sqrt(np.mean(official_position_error ** 2)))
+    elif alignment == "none":
+        evaluated_trajectory = estimate_trajectory
+        position_error = np.linalg.norm(
+            estimate_trajectory.positions - ground_truth_trajectory.positions,
+            axis=1,
+        )
+        ate_rmse = float(np.sqrt(np.mean(position_error ** 2)))
+    else:
+        raise ValueError(f"Unsupported alignment: {alignment}")
+
     pose_metrics = compute_pose_metrics(
-        Trajectory.from_tum_array(estimate[:, :8]),
-        Trajectory.from_tum_array(ground_truth[:, :8]),
+        evaluated_trajectory,
+        ground_truth_trajectory,
         rpe_delta_seconds,
     )
 
@@ -132,38 +162,33 @@ def compute_metrics(
     )
 
     gt_speed = np.linalg.norm(ground_truth[:, 8:11], axis=1)
-    rve = velocity_error / np.maximum(gt_speed, float(min_speed))
-    moving_rve = rve[gt_speed > float(min_speed)]
-    if len(moving_rve) == 0:
-        raise ValueError("Cannot compute RVE because all GT speeds are near zero")
+    relative_velocity_error = np.zeros_like(gt_speed)
+    nonzero_speed = gt_speed != 0.0
+    relative_velocity_error[nonzero_speed] = (
+        velocity_error[nonzero_speed] / gt_speed[nonzero_speed]
+    )
 
-    thresholds = np.linspace(float(xi_min), float(xi_max), int(xi_count))
+    # The official evaluator writes these intermediate values with eight
+    # decimal places before integrating the success curve.
+    relative_velocity_error = np.round(relative_velocity_error, decimals=8)
+    gt_speed = np.round(gt_speed, decimals=8)
+
+    thresholds = np.linspace(EVSLAM_XI_MIN, EVSLAM_XI_MAX, EVSLAM_XI_COUNT)
     success = compute_weighted_success_curve(
-        rve=rve,
+        relative_velocity_error=relative_velocity_error,
         gt_speed=gt_speed,
         thresholds=thresholds,
     )
 
     auc = float(np.trapz(success, thresholds))
 
-    interval = float(xi_max - xi_min)
-    if interval <= 0.0:
-        raise ValueError(f"xi_max must be greater than xi_min, got {xi_min}, {xi_max}")
-
-    auc_normalized = auc / interval
-
     return EvSlamMetrics(
         sample_count=int(estimate.shape[0]),
-        ate=pose_metrics.position_mean,
-        ate_rmse=pose_metrics.position_rmse,
-        ate_median=pose_metrics.position_median,
-        ate_max=pose_metrics.position_max,
+        position_mean=pose_metrics.position_mean,
+        ate_rmse=ate_rmse,
+        position_median=pose_metrics.position_median,
+        position_max=pose_metrics.position_max,
         auc=auc,
-        auc_normalized=float(auc_normalized),
-        mean_rve=float(np.mean(moving_rve)),
-        median_rve=float(np.median(moving_rve)),
-        max_rve=float(np.max(moving_rve)),
-        rve_sample_count=len(moving_rve),
         rotation_rmse_deg=pose_metrics.rotation_rmse_deg,
         rpe_pair_count=pose_metrics.rpe_pair_count,
         rpe_delta_median_s=pose_metrics.rpe_delta_median_s,
@@ -172,8 +197,53 @@ def compute_metrics(
     )
 
 
+def match_evslam_timestamps(
+    estimate_timestamps: np.ndarray,
+    gt_timestamps: np.ndarray,
+    tolerance: float,
+) -> tuple:
+    """Reproduce the nearest-neighbour timestamp matching in evaluate.py."""
+    estimate_timestamps = np.asarray(estimate_timestamps, dtype=np.float64)
+    gt_timestamps = np.asarray(gt_timestamps, dtype=np.float64)
+    estimate_order = np.argsort(estimate_timestamps)
+    estimate_sorted = estimate_timestamps[estimate_order]
+
+    estimate_indices = []
+    gt_indices = []
+    estimate_index = 0
+    for gt_index, gt_timestamp in enumerate(gt_timestamps):
+        while (
+            estimate_index < len(estimate_sorted)
+            and estimate_sorted[estimate_index] < gt_timestamp
+        ):
+            estimate_index += 1
+
+        best_index = None
+        best_distance = float("inf")
+        if estimate_index < len(estimate_sorted):
+            distance = abs(estimate_sorted[estimate_index] - gt_timestamp)
+            if distance <= tolerance and distance < best_distance:
+                best_index = estimate_index
+                best_distance = distance
+        if estimate_index > 0:
+            distance = abs(estimate_sorted[estimate_index - 1] - gt_timestamp)
+            if distance <= tolerance and distance < best_distance:
+                best_index = estimate_index - 1
+
+        if best_index is not None:
+            estimate_indices.append(int(estimate_order[best_index]))
+            gt_indices.append(gt_index)
+
+    if not estimate_indices:
+        raise ValueError("Estimate and ground truth have no matching timestamps")
+    return (
+        np.asarray(estimate_indices, dtype=np.int64),
+        np.asarray(gt_indices, dtype=np.int64),
+    )
+
+
 def compute_weighted_success_curve(
-    rve: np.ndarray,
+    relative_velocity_error: np.ndarray,
     gt_speed: np.ndarray,
     thresholds: np.ndarray,
 ) -> np.ndarray:
@@ -188,7 +258,7 @@ def compute_weighted_success_curve(
     success = np.empty(len(thresholds), dtype=np.float64)
 
     for index, threshold in enumerate(thresholds):
-        mask = rve < threshold
+        mask = relative_velocity_error < threshold
         success[index] = float(np.sum(gt_speed[mask]) / weight_sum)
 
     return success
@@ -199,12 +269,11 @@ def write_metrics(
     output_path: Path,
     estimate_path: Path,
     ground_truth_path: Path,
-    xi_min: float,
-    xi_max: float,
-    xi_count: int,
     rpe_delta_seconds: float,
     estimate_count: int,
     gt_count: int,
+    alignment: str,
+    timestamp_tolerance: float,
 ) -> None:
     """
     Save metrics to a text file.
@@ -220,16 +289,21 @@ def write_metrics(
         file.write(f"estimate_sample_count: {estimate_count}\n")
         file.write(f"gt_sample_count: {gt_count}\n")
         file.write(f"matched_sample_count: {metrics.sample_count}\n")
+        file.write(f"timestamp_tolerance_s: {timestamp_tolerance:.9f}\n")
+        file.write(f"alignment: {alignment}\n")
         file.write(f"estimate_coverage: {metrics.sample_count / estimate_count:.9f}\n")
         file.write(f"gt_coverage: {metrics.sample_count / gt_count:.9f}\n")
         file.write("\n")
 
         file.write("Position metrics\n")
         file.write("-" * 80 + "\n")
-        file.write(f"ATE: {metrics.ate:.9f}\n")
-        file.write(f"ATE_RMSE: {metrics.ate_rmse:.9f}\n")
-        file.write(f"ATE_median: {metrics.ate_median:.9f}\n")
-        file.write(f"ATE_max: {metrics.ate_max:.9f}\n")
+        file.write(f"position_error_mean_m: {metrics.position_mean:.9f}\n")
+        if alignment == "se3":
+            file.write(f"ATE_RMSE_m: {metrics.ate_rmse:.9f}\n")
+        else:
+            file.write(f"position_RMSE_m: {metrics.ate_rmse:.9f}\n")
+        file.write(f"position_error_median_m: {metrics.position_median:.9f}\n")
+        file.write(f"position_error_max_m: {metrics.position_max:.9f}\n")
         file.write(f"rotation_RMSE_deg: {metrics.rotation_rmse_deg:.9f}\n")
         file.write(f"RPE_delta_target_s: {rpe_delta_seconds:.9f}\n")
         file.write(f"RPE_delta_median_s: {metrics.rpe_delta_median_s:.9f}\n")
@@ -240,28 +314,24 @@ def write_metrics(
 
         file.write("Velocity metrics\n")
         file.write("-" * 80 + "\n")
-        file.write(f"xi_min: {xi_min:.9f}\n")
-        file.write(f"xi_max: {xi_max:.9f}\n")
-        file.write(f"xi_count: {xi_count}\n")
-        file.write(f"RVE_sample_count: {metrics.rve_sample_count}\n")
+        file.write(f"xi_min: {EVSLAM_XI_MIN:.9f}\n")
+        file.write(f"xi_max: {EVSLAM_XI_MAX:.9f}\n")
+        file.write(f"xi_count: {EVSLAM_XI_COUNT}\n")
         file.write(f"AUC: {metrics.auc:.9f}\n")
-        file.write(f"AUC_normalized: {metrics.auc_normalized:.9f}\n")
-        file.write(f"mean_RVE: {metrics.mean_rve:.9f}\n")
-        file.write(f"median_RVE: {metrics.median_rve:.9f}\n")
-        file.write(f"max_RVE: {metrics.max_rve:.9f}\n")
 
 
-def print_metrics(metrics: EvSlamMetrics) -> None:
+def print_metrics(metrics: EvSlamMetrics, alignment: str) -> None:
     print("EvSLAM metrics")
     print("=" * 80)
     print(f"sample_count: {metrics.sample_count}")
-    print(f"ATE: {metrics.ate:.9f}")
-    print(f"ATE_RMSE: {metrics.ate_rmse:.9f}")
+    print(f"position_error_mean_m: {metrics.position_mean:.9f}")
+    if alignment == "se3":
+        print(f"ATE_RMSE_m: {metrics.ate_rmse:.9f}")
+    else:
+        print(f"position_RMSE_m: {metrics.ate_rmse:.9f}")
     print(f"RPE_translation_RMSE_m: {metrics.rpe_translation_rmse:.9f}")
     print(f"RPE_rotation_RMSE_deg: {metrics.rpe_rotation_rmse_deg:.9f}")
     print(f"AUC: {metrics.auc:.9f}")
-    print(f"AUC_normalized: {metrics.auc_normalized:.9f}")
-    print(f"median_RVE: {metrics.median_rve:.9f}")
 
 
 if __name__ == "__main__":

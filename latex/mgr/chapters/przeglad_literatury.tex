@@ -1,19 +1,132 @@
 \chapter{Przegląd literatury}
-% Plan: Usystematyzować najważniejsze podejścia do event-based VO, SLAM i fuzji inercyjnej oraz wskazać miejsce opracowanego systemu. Źródła: wyłącznie sprawdzone publikacje pierwotne i survey. Materiał: tabela porównawcza sensorów, reprezentacji, mapy i sposobu ewaluacji.
 \label{cha:przeglad_literatury}
 
-\section{Odometria i mapowanie z kamer zdarzeniowych}
-% Plan: Omówić reprezentatywne metody geometryczne i bezpośrednie, ze szczególnym uwzględnieniem EVO oraz rozwiązań stereo. Źródła: EVO i oryginalne prace najbliższych metod eventowych. Materiał: tabela klasyfikująca wejścia, wyjścia, skalę i typ mapy.
+W~rozdziale omówiono systemy VO i~SLAM, które dostarczyły istotnych rozwiązań architektonicznych lub algorytmicznych. Systemy PTAM, S-PTAM i~ORB-SLAM zostały opracowane dla obrazów i~nie przetwarzają bezpośrednio asynchronicznego strumienia zdarzeń. Ich uwzględnienie wynika z~możliwości zastosowania wybranych mechanizmów po wcześniejszym zgrupowaniu zdarzeń w~regularne reprezentacje obrazowe. Na takich reprezentacjach można wykrywać i~śledzić punkty, natomiast klatki kluczowe, rzadka mapa, relokalizacja i~domykanie pętli mogą działać według zasad znanych z~klasycznych systemów SLAM. Nie oznacza to wykorzystania ORB-SLAM jako gotowego algorytmu dla kamer zdarzeniowych, lecz adaptację wybranych elementów jego architektury. Możliwość łączenia klatek zdarzeniowych z~metodami opracowanymi dla obrazów pokazano między innymi w~systemach Rebecqa i~UltimateSLAM~\cite{rebecq2017eventvio,vidal2018ultimate}.
+
+\section{Architektury odometrii wizyjnej i SLAM-u dla kamer klatkowych}
+\label{sec:literatura_klasyczny_slam}
+
+% PTAM i S-PTAM: rozdzielenie śledzenia od mapowania, klatki kluczowe, lokalna mapa i skala stereo.
+% ORB-SLAM i ORB-SLAM2: cechy ORB, relokalizacja, rozpoznawanie miejsc i korekta pętli.
+% Na końcu wskazać elementy ważne dla własnego systemu.
+
+\subsection{PTAM i S-PTAM}
+\label{subsec:literatura_ptam_sptam}
+
+\textbf{PTAM} (ang. \textit{Parallel Tracking and Mapping}) jest jednokamerowym, opartym na punktach charakterystycznych (ang. \textit{feature-based}) systemem przeznaczonym do pracy w~niewielkich przestrzeniach rozszerzonej rzeczywistości~\cite{klein2007ptam}. Jego najważniejszym wkładem jest rozdzielenie śledzenia i~mapowania na dwa równolegle działające wątki. Pierwszy estymuje bieżącą pozę kamery względem mapy punktów 3D, natomiast drugi dodaje klatki kluczowe, trianguluje nowe punkty i~wykonuje optymalizację wiązki. Pozwala to prowadzić śledzenie z~częstotliwością klatek obrazu, podczas gdy bardziej kosztowna obliczeniowo aktualizacja mapy może być wykonywana niezależnie. Konfiguracja jednokamerowa nie zapewnia bezwzględnej skali, a~system jest przeznaczony przede wszystkim do niewielkich, względnie statycznych i~dostatecznie teksturowanych scen~\cite{klein2007ptam}.
+
+\textbf{S-PTAM} (ang. \textit{Stereo Parallel Tracking and Mapping}) rozwija koncepcję równoległego śledzenia i~mapowania znaną z~PTAM, wykorzystując zsynchronizowaną parę kamer stereo~\cite{pire2017sptam}. Ogólną architekturę systemu oraz przepływ informacji pomiędzy jego głównymi modułami przedstawiono na rys.~\ref{fig:sptam_arch}.
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=0.75\linewidth]{literature_s_ptam_architecture.png}
+\caption{Schemat architektury systemu S-PTAM. Źródło: \cite{pire2017sptam}.}
+\label{fig:sptam_arch}
+\end{figure}
+
+Korespondencje pomiędzy obrazami lewej i~prawej kamery umożliwiają triangulację punktów już podczas inicjalizacji mapy oraz odtworzenie rzeczywistej skali sceny. Wątek śledzenia estymuje bieżącą pozę kamery na podstawie dopasowań pomiędzy punktami mapy 3D a~cechami obserwowanymi w~aktualnej parze obrazów, natomiast działający równolegle wątek mapowania przetwarza klatki kluczowe, dodaje nowe punkty mapy oraz wykonuje lokalną optymalizację wiązki. Dzięki rozdzieleniu obu zadań śledzenie może działać z~częstotliwością napływających obrazów, podczas gdy aktualizacja mapy wykonywana jest z~mniejszą częstotliwością~\cite{pire2017sptam}.
+
+System obejmuje również moduł wykrywania i~domykania pętli. Po rozpoznaniu i~weryfikacji ponownej obserwacji wcześniej odwiedzonego miejsca do grafu pozy dodawane jest nowe ograniczenie, a~jego optymalizacja pozwala zmniejszyć dryf narastający podczas estymacji trajektorii~\cite{pire2017sptam}. Autorzy analizują ponadto wpływ zastosowanych detektorów i~deskryptorów cech na dokładność oraz koszt obliczeniowy systemu.
+
+W~benchmarku KITTI S-PTAM uzyskał średni względny błąd translacji (ang. \textit{average relative translation error}, $t_{\mathrm{rel}}$) równy $1{,}19\%$ oraz średni względny błąd rotacji (ang. \textit{average relative rotation error}, $r_{\mathrm{rel}}$) równy $0{,}0025^\circ/\mathrm{m}$. Dla obrazów stereo o~rozdzielczości $1344\times391$ pikseli, rejestrowanych z~częstotliwością $10\,\mathrm{Hz}$, średni czas śledzenia wyniósł $55{,}22\,\mathrm{ms}$ na laptopie z~procesorem Intel Core i7 $2{,}8\,\mathrm{GHz}$~\cite{geiger2012kitti,pire2017sptam}.
+
+
+Z~obu prac przyjęto ogólny podział na szybkie śledzenie oraz wolniejsze
+zarządzanie mapą zbudowaną z~klatek kluczowych i~punktów 3D. S-PTAM jest
+szczególnie bliski projektowi ze względu na przepływ
+\textit{stereo -- triangulacja -- lokalna mapa -- estymacja pozy -- graf}.
+
+\subsection{ORB-SLAM}
+\label{subsec:literatura_orbslam}
+
+\textbf{ORB-SLAM} wykorzystuje cechy pochodzące z algorytmu ORB we wszystkich podstawowych zadaniach systemu: śledzeniu, mapowaniu, relokalizacji i~domykaniu pętli~\cite{murartal2015orbslam}. Jego trzy główne wątki odpowiadają za estymację bieżącej pozy kamery, lokalne rozwijanie i~optymalizację mapy oraz wykrywanie i~korektę pętli. Mapa zawiera klatki kluczowe, punkty 3D oraz graf współwidoczności, który pozwala ograniczać śledzenie i~mapowanie do lokalnego fragmentu mapy. Kandydaci na domknięcie pętli są wybierani na podstawie podobieństwa wyglądu, a~następnie poddawani weryfikacji geometrycznej przed zaakceptowaniem pętli i~korektą grafu. Ograniczeniem konfiguracji jednokamerowej jest brak bezwzględnej skali oraz możliwość jej dryfu podczas estymacji trajektorii~\cite{murartal2015orbslam}.
+
+\textbf{ORB-SLAM2} rozwija tę architekturę, dodając obsługę kamer stereo i~RGB-D~\cite{murartal2017orbslam2}. W~przypadku stereo system rozróżnia punkty bliskie i~dalekie. Punkty bliskie, dla których głębokość może być wiarygodnie wyznaczona z~pojedynczej pary obrazów, są bezpośrednio triangulowane i~dostarczają informacji o~metrycznej skali, translacji i~rotacji. Punkty dalekie dostarczają słabszej informacji o~translacji i~skali, dlatego są triangulowane dopiero po uzyskaniu obserwacji z~wielu widoków~\cite{murartal2017orbslam2}.
+
+Na 11 sekwencjach KITTI, zarejestrowanych z~częstotliwością $10\,\mathrm{Hz}$ i~po rektyfikacji mających rozdzielczość $1240\times376$ pikseli, średni względny błąd translacji (ang. \textit{average relative translation error}, $t_{\mathrm{rel}}$) ORB-SLAM2 był na większości przebiegów mniejszy niż $1\%$. Dla sekwencji 00 wyniósł $0{,}70\%$, a~bezwzględny pierwiastek błędu średniokwadratowego translacji (ang. \textit{absolute translation Root Mean Square Error}, $t_{\mathrm{abs}}$) był równy $1{,}3\,\mathrm{m}$~\cite{geiger2012kitti,murartal2017orbslam2}.
+
+Istotnym wzorcem wspólnym dla obu systemów jest wykorzystanie lokalnej mapy podczas śledzenia, selekcja klatek kluczowych oraz rozdzielenie wyszukiwania kandydatów na podstawie podobieństwa wizualnego od ich późniejszej weryfikacji geometrycznej. Taka organizacja stanowi również użyteczny punkt odniesienia dla systemów wykorzystujących obrazy tworzone ze zdarzeń, pod warunkiem możliwości niezawodnego wykrywania i~dopasowywania na nich cech.
+
+
+\section{Odometria wizyjna na podstawie danych z kamer zdarzeniowych w układzie stereo}
 \label{sec:literatura_event_vo}
 
-\section{Systemy SLAM i rozpoznawanie miejsc}
-% Plan: Pokazać rozwój od organizacji klatek kluczowych do map-based tracking, relokalizacji i loop closure oraz przeniesienie tych idei na dane zdarzeniowe. Źródła: PTAM, S-PTAM, ORB-SLAM, ORB-SLAM2 i Milford. Materiał: porównanie elementów back-endu w analizowanych systemach.
-\label{sec:literatura_slam}
+% ESVO i ESVO2: powierzchnie czasu, śledzenie, mapowanie, skala stereo i rozszerzenie o IMU.
+% Krótko podać wymagania i różnice względem własnego systemu.
 
-\section{Metody wizualno-inercyjne}
-% Plan: Przedstawić pełne VIO jako punkt odniesienia i odróżnić je od użycia samego żyroskopu w tej pracy. Źródła: eventowe VIO Rebecqa, OKVIS, VINS-Mono i ORB-SLAM3. Materiał: tabela estymowanych stanów, użytych sensorów i sposobu modelowania biasów.
+\subsection{ESVO}
+\label{subsec:literatura_esvo}
+
+\textbf{ESVO} (ang. \textit{Event-based Stereo Visual Odometry}) jest bezpośrednią metodą odometrii wykorzystującą stereoskopowy układ skalibrowanych kamer zdarzeniowych~\cite{zhou2021esvo}. Zdarzenia reprezentowane są za pomocą powierzchni czasu (ang. \textit{time surface}), której wartości zależą od chwili wystąpienia ostatniego zdarzenia w~danym pikselu. Metoda nie opiera się na klasycznych deskryptorach i~ich dopasowywaniu, lecz wykorzystuje bezpośrednio czasowo-przestrzenną strukturę zdarzeń.
+
+Moduł mapowania estymuje odwrotną głębokość przez maksymalizację zgodności czasowo-przestrzennej pomiędzy obserwacjami obu kamer, a~kolejne estymaty są łączone w~lokalną, półgęstą mapę. Moduł śledzenia wyznacza natomiast pozę kamery przez rejestrację punktów tej mapy względem bieżącej powierzchni czasu~\cite{zhou2021esvo}. Znana geometria układu stereo umożliwia odtworzenie głębokości w~skali metrycznej.
+
+Na sekwencjach \texttt{rpg\_bin}~\cite{zhou2018stereoreconstruction} o~rozdzielczości $240\times180$ pikseli i~\texttt{upenn\_flying3}~\cite{zhu2018mvsec} o~rozdzielczości $346\times260$ pikseli system uzyskał wartość RMS bezwzględnego błędu trajektorii (ang. \textit{Absolute Trajectory Error}, ATE) równą odpowiednio $2{,}8\,\mathrm{cm}$ i~$11{,}1\,\mathrm{cm}$. Implementacja działała w~czasie rzeczywistym na laptopie z~procesorem Intel Core i7-8750H, przy czym moduł mapowania pracował zwykle z~częstotliwością $20\,\mathrm{Hz}$~\cite{zhou2021esvo}.
+
+\textbf{ESVO2} rozwija tę architekturę do stereoskopowej odometrii wizyjno-inercyjnej~\cite{niu2025esvo2}. W~module mapowania wprowadzono efektywniejsze wybieranie punktów konturów na podstawie lokalnej dynamiki zdarzeń oraz połączono estymaty głębokości uzyskiwane ze stereo czasowego i~stereo statycznego. Preintegracja pomiarów IMU dostarcza wstępnego oszacowania ruchu dla modułu śledzenia, natomiast backend aktualizuje oszacowania prędkości liniowej oraz biasów IMU. Informacja inercyjna ogranicza wskazaną przez autorów degenerację śledzenia dotyczącą składowych obrotu \textit{pitch} i~\textit{yaw}~\cite{niu2025esvo2}.
+
+ESVO2 oceniono na pięciu publicznych zbiorach z~kamerami o~rozdzielczościach od $240\times180$ do $1280\times720$ pikseli. Autorzy wykazali działanie w~czasie rzeczywistym na standardowym procesorze dla danych o~rozdzielczości do $640\times480$ pikseli~\cite{niu2025esvo2}.
+
+ESVO i~ESVO2 wykorzystują bezpośrednio strukturę czasową zdarzeń i~nie wymagają klasycznego dopasowywania deskryptorów. Oba systemy realizują przede wszystkim lokalną estymację ruchu i~mapowanie, bez modułów globalnej relokalizacji i~domykania pętli.
+
+
+\section{Rozpoznawanie miejsc w danych zdarzeniowych}
+\label{sec:literatura_event_place}
+
+% Odróżnić rozpoznanie miejsca, relokalizację i domknięcie pętli.
+% Opisać metodę Milforda i zaznaczyć, że kandydat wymaga weryfikacji geometrycznej.
+
+\textbf{Rozpoznawanie miejsca} (ang. \textit{visual place recognition}, VPR) polega na odnalezieniu wcześniejszej obserwacji odpowiadającej aktualnie obserwowanemu miejscu. Sam wynik podobieństwa nie określa jednak względnej transformacji przestrzennej, dlatego w~systemach SLAM rozpoznane miejsce stanowi zwykle jedynie kandydata do relokalizacji lub domknięcia pętli, wymagającego dodatkowej weryfikacji geometrycznej~\cite{murartal2015orbslam}.
+
+Jedną z~pierwszych prób wykorzystania kamer zdarzeniowych do tego zadania przedstawili Milford i~współautorzy~\cite{milford2015towards}. Zdarzenia grupowano w~stałych oknach czasowych, tworząc niskorozdzielcze obrazy wejściowe dla algorytmu SeqSLAM, który porównuje sekwencje kolejnych obserwacji. Eksperymenty wykazały spadek skuteczności przy dużych różnicach prędkości przejścia. Wstępne testy wskazały również, że zwiększenie długości okna akumulacji i~pominięcie polaryzacji zdarzeń może poprawić wyniki, choć wariant ten nie został kompleksowo oceniony~\cite{milford2015towards}.
+
+Metodę połączono z~uproszczoną odometrią i~grafową reprezentacją mapy, uzyskując półmetryczną, topologicznie poprawną mapę trasy o~długości \SI{2.7}{\kilo\metre}. Odometria zakładała jednak ruch na płaszczyźnie, a~translację przybliżano na podstawie zliczania kroków operatora, dlatego nie był to ogólny system SLAM dla swobodnego ruchu kamery~\cite{milford2015towards}.
+
+Późniejsze badania potwierdziły możliwość rozpoznawania miejsc bezpośrednio na podstawie strumienia zdarzeń. Fischer i~Milford pokazali, że wystarczająca może być nawet liczba zdarzeń w~niewielkim zbiorze wybranych pikseli, a~reprezentacje zawierające stałą liczbę zdarzeń zwiększają odporność na zmianę prędkości ruchu~\cite{fischer2022eventvpr}. Wyniki te pokazują, że sposób grupowania i~reprezentacji zdarzeń ma istotny wpływ na skuteczność rozpoznawania miejsc.
+
+\section{Systemy wizyjno-inercyjne i wielosensorowe}
 \label{sec:literatura_vio}
 
-\section{Wnioski z przeglądu}
-% Plan: Uzasadnić wybór rzadkiego stereo SLAM-u cechowego i wypunktować różnice względem publikowanych systemów bez deklarowania przewagi bez wyników. Źródła: synteza wcześniej zweryfikowanych prac i wymagania projektu. Materiał: tabela decyzji projektowych oraz ich konsekwencji.
+% Krótko zdefiniować pełne VIO.
+% Opisać zdarzeniowe VIO Rebecqa i UltimateSLAM: kompensację ruchu, śledzenie cech oraz połączenie zdarzeń, klatek i IMU.
+
+\textbf{Odometrię wizyjno-inercyjną} (ang. \textit{Visual-Inertial Odometry}, VIO) można traktować jako wspólną estymację stanu na podstawie obserwacji wizyjnych i~pomiarów IMU. Estymowany stan obejmuje zwykle pozę, prędkość oraz obciążenia pomiarowe czujników inercyjnych. Przykładem rozwiniętego systemu tego typu jest \textbf{ORB-SLAM3}, który rozszerza cechowy SLAM o~ściśle sprzężoną estymację wizyjno-inercyjną~\cite{campos2021orbslam3}.
+
+\subsection{Zdarzeniowe VIO Rebecqa}
+\label{subsec:event_vio}
+
+Rebecq i~współautorzy zaproponowali system VIO wykorzystujący jedną kamerę zdarzeniową i~pełną jednostkę IMU, bez korzystania z~klasycznych klatek intensywności z DVS (ang. \textit{Dynamic Vision Sensor}, czyli kamery zdarzeniowej)~\cite{rebecq2017eventvio}. Lokalizacja zdarzeń jest kompensowana ze względu na  ruch własny kamery i~przenoszone są one do wspólnego czasu odniesienia z~użyciem bieżącej estymaty ruchu oraz informacji o~głębokości. Następnie tworzone są klatki zdarzeniowe. Na ich podstawie wykrywane są cechy FAST, śledzone metodą Lucas--Kanade i~triangulowane do lokalnej mapy.
+
+Logika oparta na klatkach kluczowych łączy obserwacje wizyjne z~pomiarami inercyjnymi i~wspólnie estymuje pozy, prędkość oraz obciążenia pomiarowe IMU~\cite{rebecq2017eventvio}.
+
+W~eksperymentach na danych o~rozdzielczości $240\times180$ pikseli średni błąd położenia (ang. \textit{Mean Position Error}) stanowił $0{,}69\%$ przebytej drogi dla sekwencji \texttt{boxes\_6dof} i~$0{,}92\%$ dla \texttt{hdr\_boxes}. Całkowity czas przetwarzania jednego okna zdarzeń wyniósł $8{,}23\,\mathrm{ms}$ na laptopie z~procesorem Intel Core i5-4278U i~$20\,\mathrm{ms}$ na platformie Odroid XU4~\cite{rebecq2017eventvio}.
+
+\subsection{UltimateSLAM}
+\label{subsec:ultimate_slam}
+
+\textbf{UltimateSLAM} rozszerza zdarzeniowe VIO Rebecqa o~równoległe wykorzystanie zwykłych obrazów intensywności~\cite{vidal2018ultimate}. Zarówno na obrazach zdarzeniowych skompensowanych ruchem, jak i~na zwykłych obrazach wykrywane są narożniki FAST, a~ich położenie jest następnie śledzone metodą Lucas--Kanade. Po wiarygodnej triangulacji punkty 3D oraz pomiary IMU są wykorzystywane we wspólnej nieliniowej optymalizacji stanu opartej na klatkach kluczowych. Przykładowe wyniki śledzenia dla obu rodzajów obrazów pokazano na rysunku~\ref{fig:ultimate_slam_tracks}~\cite{vidal2018ultimate}.
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=0.88\linewidth,trim=0 18 0 0,clip]{literature_ultimate_slam_feature_tracks.png}
+    \caption{Ślady cech w~systemie UltimateSLAM na zwykłych obrazach (górny rząd) i~obrazach zdarzeniowych skompensowanych ruchem (dolny rząd), dla różnych warunków ruchu i~oświetlenia. Rysunek z~publikacji~\cite{vidal2018ultimate}.}
+    \label{fig:ultimate_slam_tracks}
+\end{figure}
+
+Oba źródła obrazu wzajemnie się uzupełniają. Zdarzenia zachowują użyteczność przy szybkim ruchu i~trudnym oświetleniu, gdy zwykłe obrazy mogą być rozmyte lub niedoświetlone. Z~kolei przy bardzo małym ruchu liczba zdarzeń maleje, dlatego zwykłe obrazy umożliwiają stabilniejsze śledzenie cech~\cite{vidal2018ultimate}. System wymaga wspólnej kalibracji kamery zdarzeniowej, kamery klatkowej i~IMU oraz ich zgodności czasowej.
+
+Na zbiorze Event Camera Dataset~\cite{mueggler2017eventdataset} o~rozdzielczości $240\times180$ pikseli, na podstawie średniego błędu położenia (ang. \textit{Mean Position Error}), autorzy odnotowali średni wzrost dokładności położenia o~$130\%$ względem wariantu wykorzystującego wyłącznie zdarzenia i~IMU oraz o~$85\%$ względem wariantu wykorzystującego obrazy klatkowe i~IMU~\cite{vidal2018ultimate}.
+
+Publikacja koncentruje się na lokalnej estymacji stanu wizyjno-inercyjnego i~nie opisuje mechanizmu globalnego rozpoznawania miejsc ani domykania pętli.
+
+
+\section{Wnioski z przeglądu literatury i wybór inspiracji projektowych}
 \label{sec:wnioski_literatura}
+
+Na podstawie analizowanych systemów przyjęto rozwiązanie, wykorzystujące punkty charakterystyczne. Położenie tych punktów w\~przestrzeni jest wyznaczane przez triangulację odpowiadających sobie obserwacji z\~kamer w układzie stereo. Znana geometria układu pozwala  uzyskać metryczną skalę translacji.
+
+Dane zdarzeniowe nie są przetwarzane bezpośrednio jako pojedyncze zdarzenia, lecz grupowane w~reprezentacje obrazowe. Pozwala to zastosować klasyczne metody wykrywania i~śledzenia punktów, podobnie jak w~zdarzeniowych systemach Rebecqa i~UltimateSLAM~\cite{rebecq2017eventvio,vidal2018ultimate}. Z~tych prac zaczerpnięto również ideę kompensowania wpływu ruchu przy tworzeniu reprezentacji zdarzeń, przy czym wykorzystano do tego informację o~obrocie z~żyroskopu.
+
+W~części odpowiedzialnej za mapowanie przyjęto klatki kluczowe, punkty 3D oraz lokalne wykorzystanie mapy, zgodnie z~rozwiązaniami stosowanymi w~S-PTAM i~systemach z~rodziny ORB-SLAM~\cite{pire2017sptam,murartal2015orbslam,murartal2017orbslam2}.
+
+W~efekcie przyjęto zestaw rozwiązań łączący stereoskopową rekonstrukcję, śledzenie punktów na reprezentacjach zdarzeniowych, wspomaganie informacją z~żyroskopu oraz geometrycznie weryfikowane domykanie pętli. Szczegóły ich realizacji przedstawiono w~kolejnym rozdziale.

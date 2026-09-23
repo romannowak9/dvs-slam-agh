@@ -1,0 +1,31 @@
+EvSLAM metrics
+================================================================================
+estimate: outputs/thesis_experiments_window24/02_ablations/baf/evslam/enabled/result_seq001.txt
+ground_truth: outputs/thesis_experiments_window24/00_configs/references/seq001_gt_005_020.txt
+estimate_sample_count: 149
+gt_sample_count: 151
+matched_sample_count: 149
+timestamp_tolerance_s: 0.001000000
+alignment: se3
+estimate_coverage: 1.000000000
+gt_coverage: 0.986754967
+
+Position metrics
+--------------------------------------------------------------------------------
+position_error_mean_m: 0.498875278
+ATE_RMSE_m: 0.574209973
+position_error_median_m: 0.366787659
+position_error_max_m: 1.226610439
+rotation_RMSE_deg: 6.783881042
+RPE_delta_target_s: 1.000000000
+RPE_delta_median_s: 1.000000000
+RPE_pair_count: 139
+RPE_translation_RMSE_m: 0.395761732
+RPE_rotation_RMSE_deg: 2.543915030
+
+Velocity metrics
+--------------------------------------------------------------------------------
+xi_min: 0.000000000
+xi_max: 1.000000000
+xi_count: 500
+AUC: 0.848989182
