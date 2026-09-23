@@ -213,22 +213,6 @@ plots_first_pose/               trajectory and velocity plots
 Generated run directories are ignored by Git and do not overwrite the curated
 results in `event-slam/outputs/thesis_results`.
 
-## Native execution
-
-Docker is the supported route. Native execution is possible on Ubuntu 20.04
-with ROS Noetic, the `dvs_msgs` package built in a Catkin workspace, and the
-Python packages listed in the Dockerfile. After sourcing ROS and the workspace:
-
-```bash
-source /opt/ros/noetic/setup.bash
-source /path/to/catkin_ws/devel/setup.bash
-cd event-slam
-./scripts/run_evslam.sh configs/my_evslam.yaml
-```
-
-M3ED does not read ROS bags, but using the same container keeps numerical and
-plotting dependencies consistent.
-
 ## Configuration and other tools
 
 The committed YAML files are the final configurations used by the convenient
