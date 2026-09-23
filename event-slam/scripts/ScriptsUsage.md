@@ -112,10 +112,8 @@ Dataset inspection and event frames:
 
 ```bash
 python3 scripts/verification/inspect_bag.py --config configs/evslam.yaml --inspect-imu
-python3 scripts/verification/inspect_m3ed_h5.py
 python3 scripts/verification/debug_event_windows.py --config configs/evslam.yaml --num-windows 10
 python3 scripts/verification/debug_event_frames.py --config configs/evslam.yaml --save-preview
-python3 scripts/verification/compare_sensors.py --config configs/evslam.yaml --only-color
 ```
 
 Calibration and IMU:
@@ -132,7 +130,6 @@ Tracking, stereo depth and mapping:
 ```bash
 python3 scripts/verification/debug_feature_tracking.py --config configs/evslam.yaml
 python3 scripts/verification/debug_stereo_depth.py --config configs/evslam.yaml --max-draw-matches 200
-python3 scripts/verification/run_stereo_pnp_vo.py --config configs/evslam.yaml --save-debug
 python3 scripts/verification/debug_slam_map.py --config configs/evslam.yaml --max-plot-distance 5
 python3 scripts/verification/plot_slam_map_results.py outputs/evslam
 ```

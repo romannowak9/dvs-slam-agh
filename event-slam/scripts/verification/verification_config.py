@@ -8,7 +8,7 @@ import yaml
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CONFIG = PROJECT_ROOT / "configs/evslam_seq007_test_slam.yaml"
+DEFAULT_CONFIG = PROJECT_ROOT / "configs/evslam.yaml"
 
 
 def verification_parser(description: str) -> argparse.ArgumentParser:
